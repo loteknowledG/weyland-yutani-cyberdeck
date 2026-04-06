@@ -23,7 +23,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [modelList, setModelList] = useState([]);
   
-  const [activeProvider, setActiveProvider] = useState(null);
+  const [activeProvider, setActiveProvider] = useState(localStorage.getItem('active_provider') || null);
   const [keys, setKeys] = useState({
     openrouter: localStorage.getItem('key_openrouter') || '',
     openai: localStorage.getItem('key_openai') || ''
@@ -100,22 +100,65 @@ export default function App() {
       return;
     }
 
-    setMessages(prev => [...prev, { role: 'AI', text: 'Establishing uplink...' }]);
+    // 1. Setup the AI message placeholder
+    const aiMessageId = Date.now();
+    setMessages(prev => [...prev, { role: 'AI', text: '...', id: aiMessageId }]);
     
     try {
-      const url = activeProvider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+      const url = activeProvider === 'openrouter' 
+        ? 'https://openrouter.ai/api/v1/chat/completions' 
+        : 'https://api.openai.com/v1/chat/completions';
+
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
-        body: JSON.stringify({ model: modelID, messages: [{ role: 'user', content: currentInput }] })
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${currentKey}` 
+        },
+        body: JSON.stringify({ 
+          model: modelID, 
+          messages: [{ role: 'user', content: currentInput }],
+          stream: true 
+        })
       });
 
-      const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
-      
-      setMessages(prev => [...prev.filter(m => m.text !== 'Establishing uplink...'), { role: 'AI', text: data.choices[0].message.content }]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      while (true) {
+        console.log("CHUNK RECEIVED:", chunk);
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        
+        // Split by 'data: ' and filter out empty strings/non-json
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          const cleanedLine = line.replace(/^data: /, "").trim();
+          
+          if (!cleanedLine || cleanedLine === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(cleanedLine);
+            const content = parsed.choices[0]?.delta?.content || "";
+            if (content) {
+              fullText += content;
+              // Update state immediately as content arrives
+              setMessages(prev => prev.map(m => 
+                m.id === aiMessageId ? { ...m, text: fullText } : m
+              ));
+            }
+          } catch (e) {
+            // This handles cases where the JSON is split across chunks
+            console.log("Partial chunk received...");
+          }
+        }
+      }
     } catch (err) {
-      setMessages(prev => [...prev.filter(m => m.text !== 'Establishing uplink...'), { role: 'SYS', text: `Uplink Failure: ${err.message}` }]);
+      setMessages(prev => [...prev, { role: 'SYS', text: `Uplink Failure: ${err.message}` }]);
     }
   };
 
@@ -144,7 +187,14 @@ export default function App() {
           <div className="system-menu" style={{ marginTop: '20px', borderTop: '1px solid #333' }}>
             <div style={{ padding: '10px 5px', fontSize: '10px', color: '#444' }}>--- UPLINK GATEWAY ---</div>
             {['openrouter', 'openai'].map(p => (
-              <div key={p} className={`channel-item ${activeProvider === p ? 'active-chan' : ''}`} onClick={() => setActiveProvider(p)}># # # # {p}</div>
+              <div key={p} 
+                className={`channel-item ${activeProvider === p ? 'active-chan' : ''}`} 
+                onClick={() => {
+                  setActiveProvider(p);
+                  localStorage.setItem('active_provider', p); // Save to disk
+                }}>
+                # # # # {p}
+              </div>
             ))}
 
             {activeProvider && (
