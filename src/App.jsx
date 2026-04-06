@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { setupAudio, playSystemSound } from './AudioEngine';
+import { transmit } from './Uplink';
 
 
-// --- PROXY CONFIGURATION ---
-// This routes your requests through your Render server to bypass CORS blocks.
-const PROXY = "https://cors-anywhere-dqgj.onrender.com/";
 
 const art = {
   popped: (id) => ` ┌───┐\n │ ${id.toUpperCase()} │▒\n └───┘▒\n  ▒▒▒▒▒`,
@@ -52,12 +50,8 @@ export default function App() {
           target = 'https://openrouter.ai/api/v1/models';
         }
         
-        const res = await fetch(PROXY + target, { 
-            headers: { 
-                'Authorization': `Bearer ${currentKey}`,
-                'X-Requested-With': 'XMLHttpRequest' // SECURITY HANDSHAKE
-            } 
-        });
+        // NEW MODULAR TRANSMIT (Clean & Hidden)
+        const res = await transmit(activeProvider, 'models', keys[activeProvider]);
 
         if (!res.ok) throw new Error(`HTTP_${res.status}`);
 
@@ -117,24 +111,19 @@ export default function App() {
         endpoint = 'https://openrouter.ai/api/v1/chat/completions';
       }
 
-      const response = await fetch(PROXY + endpoint, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'Authorization': `Bearer ${currentKey}`,
-          'X-Requested-With': 'XMLHttpRequest', // SECURITY HANDSHAKE
-          'HTTP-Referer': window.location.href,
-        },
-        body: JSON.stringify({ 
-          model: modelID, 
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: val }], 
-          stream: true 
-        })
+      // NEW MODULAR TRANSMIT
+      const res = await transmit(activeProvider, 'chat', keys[activeProvider], {
+        model: modelID,
+        messages: [
+          { role: 'system', content: "Concise, technical." },
+          { role: 'user', content: val }
+        ],
+        stream: true
       });
 
-      if (!response.ok) throw new Error(`HTTP_${response.status}`);
+      if (!res.ok) throw new Error(`HTTP_${res.status}`);
 
-      const reader = response.body.getReader();
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = ""; let streamBuffer = "";
 
@@ -167,14 +156,17 @@ export default function App() {
 
   if (!booted) {
     return (
-      <div onClick={() => { setupAudio(); setBooted(true); }} style={{ height: '100vh', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
+      <div onClick={() => { 
+        setupAudio(); // This initializes the context safely inside the module
+        setBooted(true); 
+      }} style={{ height: '100vh', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
         <pre>{`[ WEYLAND-YUTANI CORP ]\n[ MU/TH/UR 6000 ]\n\n>> INITIALIZE UPLINK <<`}</pre>
       </div>
     );
   }
 
   return (
-    <div onClick={() => { if (audioCtx?.state === 'suspended') audioCtx.resume(); }} style={{ backgroundColor: '#000', color: '#00ff00', height: '100vh', display: 'flex', fontFamily: 'monospace', overflow: 'hidden', fontSize: '14px' }}>
+   <div onClick={() => setupAudio()} style={{ backgroundColor: '#000', color: '#00ff00', height: '100vh', display: 'flex', fontFamily: 'monospace', overflow: 'hidden', fontSize: '14px' }}>
       
       {/* COL 1: SERVERS */}
       <div style={{ width: '80px', borderRight: '1px solid #1a1a1a', padding: '10px' }}>
