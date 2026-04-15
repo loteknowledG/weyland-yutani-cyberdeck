@@ -14,7 +14,7 @@ export default function App() {
   const [server, setServer] = useState('m');
   const [chan, setChan] = useState('agenda');
   const [input, setInput] = useState('');
-  const [channelData, setChannelData] = useState({ agenda: [], intel: [], logs: [] });
+  const [channelData, setChannelData] = useState({ agenda: [], intel: [], logs: [], providers: [], 'samus-manus': [] });
   const [modelList, setModelList] = useState([]);
   
   // OPENCODE ADDED TO PROVIDERS
@@ -120,9 +120,21 @@ export default function App() {
           ? '#ff7a7a'
           : '#00ff00')));
   const currentModelHealth = modelHealthByProvider[activeProvider]?.[modelID] || 'idle';
+  const serverLabelById = {
+    m: 'OPERATOR',
+    s: 'MAINNET-UPLINK',
+    b: 'SAMUS-MANUS'
+  };
+  const defaultChannelByServer = {
+    m: 'agenda',
+    s: 'providers',
+    b: 'samus-manus'
+  };
   const secondColumnSelectionLabel = server === 'm'
     ? chan.toUpperCase()
-    : (chan === 'providers' ? 'GATEWAY' : chan.toUpperCase());
+    : (server === 's'
+      ? (chan === 'providers' ? 'GATEWAY' : chan.toUpperCase())
+      : 'SAMUS-MANUS');
   const providerTint = !providerReady
     ? inactiveTextColor
     : (currentModelHealth === 'green'
@@ -1029,7 +1041,7 @@ export default function App() {
   if (!booted) {
     return (
       <>
-        <div className="boot-screen" onClick={() => setupAudio()} style={{ height: 'var(--app-height, 100vh)', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
+        <div className="boot-screen" onClick={() => { setupAudio(); setBooted(true); }} style={{ height: 'var(--app-height, 100vh)', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
           <pre style={{ textAlign: 'center' }}>{`[ WAYLAND-YUTANI CYBERDEC ]\n[ MU/TH/UR 6000 ]\n\n${getBootArrows()}`}</pre>
         </div>
       </>
@@ -1044,7 +1056,8 @@ export default function App() {
       <aside className="flex flex-col items-center flex-shrink-0 w-16 border-r border-gray-800 bg-gray-900 py-4 z-40 relative">
         {[
           { id: 'm', glyph: 'Ø' },
-          { id: 's', glyph: 'μ' }
+          { id: 's', glyph: 'μ' },
+          { id: 'b', glyph: '§' }
         ].map(button => (
           <div key={button.id} className="btn-container" style={{ width: '56px', height: '52px', position: 'relative' }}>
             <pre
@@ -1055,7 +1068,7 @@ export default function App() {
                 }
                 if (server !== button.id) {
                   setServer(button.id); 
-                  setChan(button.id === 'm' ? 'agenda' : 'providers'); 
+                  setChan(defaultChannelByServer[button.id] || 'agenda'); 
                   playSystemSound('chirp'); 
                 } else {
                   playSystemSound('click', 0.05);
@@ -1090,7 +1103,7 @@ export default function App() {
             />
           </>
         )}
-        <div style={{ color: '#8a8a8a', fontSize: '10px', marginBottom: '10px', letterSpacing: '0.04em', paddingRight: '24px' }}>{server === 'm' ? 'ØPERATOR' : 'MAINNET-UPLINK'}</div>
+        <div style={{ color: '#8a8a8a', fontSize: '10px', marginBottom: '10px', letterSpacing: '0.04em', paddingRight: '24px' }}>{server === 'm' ? 'ØPERATOR' : (serverLabelById[server] || 'MAINNET-UPLINK')}</div>
         {server === 'm' ? (
           ['agenda', 'intel', 'logs'].map(c => (
             <div
@@ -1121,7 +1134,7 @@ export default function App() {
               {chan === c ? '> ' : '# '}{c.toUpperCase()}
             </div>
           ))
-        ) : (
+        ) : server === 's' ? (
           <>
             <div onClick={() => { setChan('providers'); playSystemSound('click'); if (isDrawerMode) setDrawerProgress(0); }} className="nav-row" style={{ cursor: 'pointer', '--nav-color': chan === 'providers' ? '#00ff00' : inactiveTextColor, '--nav-shadow': chan === 'providers' ? activeTextGlow : inactiveTextGlow, '--nav-hover-color': chan === 'providers' ? '#36ff73' : '#b0b0b0', '--nav-hover-shadow': chan === 'providers' ? '0 0 10px rgba(54, 255, 115, 0.30)' : inactiveTextGlow, paddingTop: '8px', paddingBottom: '8px' }}># GATEWAY</div>
             {providers.map(p => (
@@ -1215,6 +1228,31 @@ export default function App() {
                     </div>
                   ))
                 )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              onClick={() => {
+                const isSelected = chan === 'samus-manus';
+                handleRowClick('chan-samus-manus', isSelected, () => {
+                  setChan('samus-manus');
+                  playSystemSound(isSelected ? 'chirp' : 'click');
+                  if (isDrawerMode) setDrawerProgress(0);
+                });
+              }}
+              className={pressedRowId === 'chan-samus-manus' ? 'nav-row pressed' : 'nav-row'}
+              style={{
+                cursor: 'pointer',
+                '--nav-color': chan === 'samus-manus' ? '#00ff00' : inactiveTextColor,
+                '--nav-shadow': chan === 'samus-manus' ? activeTextGlow : inactiveTextGlow,
+                '--nav-hover-color': chan === 'samus-manus' ? '#36ff73' : '#b0b0b0',
+                '--nav-hover-shadow': chan === 'samus-manus' ? '0 0 10px rgba(54, 255, 115, 0.30)' : inactiveTextGlow,
+                paddingTop: '8px',
+                paddingBottom: '8px'
+              }}
+            >
+              {chan === 'samus-manus' ? '> ' : '# '}SAMUS-MANUS
             </div>
           </>
         )}
