@@ -134,7 +134,7 @@ export default function App() {
     ? chan.toUpperCase()
     : (server === 's'
       ? (chan === 'providers' ? 'GATEWAY' : chan.toUpperCase())
-      : 'SAMUS-MANUS');
+      : 'VOICE');
   const providerTint = !providerReady
     ? inactiveTextColor
     : (currentModelHealth === 'green'
@@ -1007,7 +1007,8 @@ export default function App() {
       live: liveMemoryCard,
       summary: summaryMemoryCard,
       tools: toolsMemoryCard,
-      viewer: viewerMemoryCard
+      viewer: viewerMemoryCard,
+      blank: voiceBlankCard
     };
     const selected = fullscreenCards[memoryFullscreenCard];
     if (!selected) return null;
@@ -1036,6 +1037,26 @@ export default function App() {
       getAspectRatio={(item) => item.aspectRatio}
       renderItem={(item) => renderDockMomentTile(item.id, 'terminal')}
     />
+  );
+  const voiceBlankCard = (
+    <MemoryMomentCard
+      title="BLANK_CARD"
+      accent="#cfcfcf"
+      onFullscreen={() => setMemoryFullscreenCard('blank')}
+      style={{
+        minWidth: '248px',
+        minHeight: '248px',
+        maxWidth: isDrawerMode ? '100%' : '320px',
+        border: '1px dashed rgba(210, 210, 210, 0.45)'
+      }}
+    >
+      <div style={{ color: '#b8b8b8' }}>EMPTY SLOT</div>
+    </MemoryMomentCard>
+  );
+  const voiceMomentPanels = (
+    <div style={{ width: '100%', display: 'flex', alignItems: 'flex-start' }}>
+      {voiceBlankCard}
+    </div>
   );
 
   if (!booted) {
@@ -1252,7 +1273,7 @@ export default function App() {
                 paddingBottom: '8px'
               }}
             >
-              {chan === 'samus-manus' ? '> ' : '# '}SAMUS-MANUS
+              {chan === 'samus-manus' ? '> ' : '# '}VOICE
             </div>
           </>
         )}
@@ -1280,6 +1301,7 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col pt-6">
 
         {server === 'm' && chan === 'intel' && memoryPanels}
+        {server === 'b' && chan === 'samus-manus' && voiceMomentPanels}
 
         <div
           ref={messageLogRef}
@@ -1307,7 +1329,10 @@ export default function App() {
       </main>
       </div>
 
-      {memoryFullscreenCard && server === 'm' && chan === 'intel' && (
+      {memoryFullscreenCard && (
+        (server === 'm' && chan === 'intel') ||
+        (server === 'b' && chan === 'samus-manus')
+      ) && (
         <div
           style={{
             position: 'fixed',
