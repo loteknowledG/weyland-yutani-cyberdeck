@@ -19,7 +19,9 @@ export default function MemoryMomentCard({
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
-    minHeight: '168px',
+    height: '100%',
+    minWidth: 'min-content',
+    minHeight: 'min-content',
     aspectRatio: '1 / 1',
     padding: '10px',
     border: '1px solid rgba(255,255,255,0.08)',
@@ -91,7 +93,7 @@ export default function MemoryMomentCard({
           ) : null}
         </div>
       </div>
-      <div style={{ color: '#bbb', fontSize: '9px', lineHeight: 1.45, overflowY: 'auto', flex: 1 }}>
+      <div style={{ color: '#bbb', fontSize: '9px', lineHeight: 1.45, minWidth: 'min-content', minHeight: 'min-content', overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
         {children}
       </div>
     </div>

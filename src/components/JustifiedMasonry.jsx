@@ -50,13 +50,11 @@ export default function JustifiedMasonry({
       let rowHeight = targetRowHeight;
       let rowWidth = row.reduce((sum, entry) => sum + (entry.aspectRatio * targetRowHeight), 0);
 
-      if (!isLast && rowWidth > 0) {
+      if (rowWidth > 0) {
         const availableWidth = Math.max(containerWidth - spacing, 0);
         const scale = availableWidth / rowWidth;
-        if (scale < 1) {
-          rowHeight = targetRowHeight * Math.max(scale, 0.5);
-          rowWidth *= scale;
-        }
+        rowHeight = targetRowHeight * Math.max(scale, 0.3);
+        rowWidth *= scale;
       }
 
       row.forEach((entry) => {
@@ -119,6 +117,9 @@ export default function JustifiedMasonry({
               style={{
                 width: `${entry.widthPercent}%`,
                 flex: '0 0 auto',
+                minWidth: 'min-content',
+                minHeight: 'min-content',
+                overflow: 'hidden',
               }}
             >
               {renderItem(entry.item, { width: '100%' })}

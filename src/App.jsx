@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+import { cloneElement, useState, useEffect, useRef } from 'react'
 import { setupAudio, playSystemSound, playLock, playSnapLock } from './AudioEngine';
 import { transmit } from './Uplink'; // Vite will automatically find .jsx
 import { art, BOOT_LOGO } from './TerminalArt';
@@ -10,6 +10,7 @@ import JustifiedMasonry from './components/JustifiedMasonry';
 
 export default function App() {
   const [booted, setBooted] = useState(false);
+  const [bootFrame, setBootFrame] = useState(0);
   const [server, setServer] = useState('m');
   const [chan, setChan] = useState('agenda');
   const [input, setInput] = useState('');
@@ -36,12 +37,19 @@ export default function App() {
     openrouter: {},
     openai: {}
   }));
+  const [modelFetchStatusByProvider, setModelFetchStatusByProvider] = useState(() => ({
+    opencode: 'idle',
+    openrouter: 'idle',
+    openai: 'idle'
+  }));
   const [probeInFlightByProvider, setProbeInFlightByProvider] = useState(() => ({
     opencode: '',
     openrouter: '',
     openai: ''
   }));
+  const [networkEvents, setNetworkEvents] = useState([]);
   const [migrationStatus, setMigrationStatus] = useState('');
+  const [selectedLegacyFileName, setSelectedLegacyFileName] = useState('');
   const [memoryCount, setMemoryCount] = useState(0);
   const [memoryPreview, setMemoryPreview] = useState([]);
   const [memorySearch, setMemorySearch] = useState('');
@@ -51,14 +59,15 @@ export default function App() {
   const [memoryCollapsed, setMemoryCollapsed] = useState(() => window.matchMedia?.('(orientation: portrait)')?.matches ?? false);
   const [memoryFullscreenCard, setMemoryFullscreenCard] = useState(null);
   const [momentDockOrder, setMomentDockOrder] = useState(() => ({
-    nav: ['live'],
-    terminal: ['summary', 'tools', 'viewer']
+    nav: [],
+    terminal: ['live', 'summary', 'tools', 'viewer']
   }));
   const [draggedMomentId, setDraggedMomentId] = useState(null);
   const [snappedMomentId, setSnappedMomentId] = useState(null);
   const [isDrawerMode, setIsDrawerMode] = useState(() => window.matchMedia?.('(max-width: 980px)')?.matches ?? false);
   const [drawerProgress, setDrawerProgress] = useState(0);
   const [drawerDragging, setDrawerDragging] = useState(false);
+  const [pressedRowId, setPressedRowId] = useState(null);
   const messageLogRef = useRef(null);
   const chatEndRef = useRef(null);
   const navColumnRef = useRef(null);
@@ -69,17 +78,74 @@ export default function App() {
   const modelID = modelByProvider[activeProvider] || '';
   const providerReady = Boolean(keys[activeProvider]);
   const isActivelyProbing = probeInFlightByProvider[activeProvider] === modelID && Boolean(modelID);
+  const inactiveTextColor = '#7a7a7a';
+
+  const handleRowClick = (rowId, isAlreadySelected, callback) => {
+    // Trigger press animation
+    setPressedRowId(rowId);
+    setTimeout(() => setPressedRowId(null), 150);
+    
+    // Play sound feedback for selected tab clicks
+    if (isAlreadySelected) {
+      playSystemSound('chirp');
+    }
+    
+    // Execute the callback
+    callback();
+  };
+  const inactiveSubtleTextColor = '#6a6a6a';
+  const activeTextGlow = '0 0 8px rgba(0, 255, 0, 0.22)';
+  const amberTextGlow = '0 0 8px rgba(255, 170, 0, 0.22)';
+  const inactiveTextGlow = '0 0 6px rgba(180, 180, 180, 0.14)';
+  const providerModelFetchStatus = modelFetchStatusByProvider[activeProvider] || 'idle';
+  const isRetrievingModels = providerModelFetchStatus === 'retrieving';
+  const providerStatusLabel = !providerReady
+    ? 'KEY_REQUIRED'
+    : (providerModelFetchStatus === 'retrieving'
+      ? 'CONNECTING... RETRIEVING_MODELS'
+      : (providerModelFetchStatus === 'invalid-key'
+        ? 'INVALID_KEY'
+        : (providerModelFetchStatus === 'error'
+          ? 'UPLINK_ERROR'
+          : (providerModelFetchStatus === 'ready'
+            ? 'MODELS_READY'
+            : 'IDLE'))));
+  const providerStatusColor = !providerReady
+    ? inactiveTextColor
+    : (providerModelFetchStatus === 'retrieving'
+      ? '#ffaa00'
+      : (providerModelFetchStatus === 'invalid-key'
+        ? '#ff5555'
+        : (providerModelFetchStatus === 'error'
+          ? '#ff7a7a'
+          : '#00ff00')));
   const currentModelHealth = modelHealthByProvider[activeProvider]?.[modelID] || 'idle';
   const secondColumnSelectionLabel = server === 'm'
     ? chan.toUpperCase()
     : (chan === 'providers' ? 'GATEWAY' : chan.toUpperCase());
   const providerTint = !providerReady
-    ? '#444'
+    ? inactiveTextColor
     : (currentModelHealth === 'green'
       ? '#00ff00'
       : (currentModelHealth === 'testing' || currentModelHealth === 'amber'
         ? '#ffaa00'
-        : '#444'));
+        : inactiveTextColor));
+  const providerTintGlow = !providerReady
+    ? inactiveTextGlow
+    : (currentModelHealth === 'green'
+      ? activeTextGlow
+      : (currentModelHealth === 'testing' || currentModelHealth === 'amber'
+        ? amberTextGlow
+        : inactiveTextGlow));
+  const actionableNetworkStatuses = new Set([
+    'Disconnected',
+    'Connection failed',
+    'Uplink error',
+    'Network disconnected',
+    'Rate limit for model hit',
+    'Model probe failed',
+    'Model probe error'
+  ]);
   const drawerWidth = Math.min(340, Math.max(260, Math.round((window.visualViewport?.width || window.innerWidth || 0) * 0.78)));
   const drawerClosedX = -(drawerWidth + 16);
   const drawerTranslateX = drawerClosedX + ((drawerProgress || 0) * (0 - drawerClosedX));
@@ -113,6 +179,27 @@ export default function App() {
         ...(prev[provider] || {}),
         [model]: status
       }
+    }));
+  };
+
+  const pushNetworkEvent = (provider, status, detail = '') => {
+    const ts = new Date().toLocaleTimeString([], { hour12: false });
+    const text = detail ? `${status} // ${detail}` : status;
+    setNetworkEvents(prev => ([
+      { id: `${Date.now()}_${Math.random()}`, provider, text, ts },
+      ...prev
+    ].slice(0, 80)));
+    if (!actionableNetworkStatuses.has(status)) return;
+    setChannelData(prev => ({
+      ...prev,
+      providers: [
+        ...(prev.providers || []),
+        { role: 'SYS', text: `${ts} NET ${provider.toUpperCase()} :: ${text}` }
+      ],
+      logs: [
+        ...(prev.logs || []),
+        { role: 'SYS', text: `${ts} NET ${provider.toUpperCase()} :: ${text}` }
+      ]
     }));
   };
 
@@ -166,6 +253,7 @@ export default function App() {
 
     setProbeInFlightByProvider(prev => ({ ...prev, [provider]: model }));
     setModelHealth(provider, model, 'testing');
+    pushNetworkEvent(provider, 'MODEL_PROBE', model);
 
     try {
       const res = await transmit(provider, 'chat', key, {
@@ -182,6 +270,11 @@ export default function App() {
       if (!res.ok) {
         const failHealth = res.status === 429 ? 'amber' : 'grey';
         setModelHealth(provider, model, failHealth);
+        if (res.status === 429) {
+          pushNetworkEvent(provider, 'Rate limit for model hit', model);
+        } else {
+          pushNetworkEvent(provider, 'Model probe failed', `HTTP ${res.status}`);
+        }
         setChannelData(prev => ({
           ...prev,
           logs: [...prev.logs, {
@@ -197,7 +290,11 @@ export default function App() {
       const valid = content.length > 0;
 
       setModelHealth(provider, model, valid ? 'green' : 'amber');
-      if (valid) playLock();
+      pushNetworkEvent(provider, valid ? 'MODEL_CONNECTED' : 'MODEL_EMPTY_RESPONSE', model);
+      if (valid) {
+        playLock();
+        if (isDrawerMode) setDrawerProgress(0);
+      }
       setChannelData(prev => ({
         ...prev,
         logs: [...prev.logs, {
@@ -207,6 +304,7 @@ export default function App() {
       }));
     } catch (err) {
       setModelHealth(provider, model, 'grey');
+      pushNetworkEvent(provider, 'Model probe error', String(err?.message || err));
       setChannelData(prev => ({
         ...prev,
         logs: [...prev.logs, {
@@ -228,6 +326,27 @@ export default function App() {
       messageLogRef.current.scrollTo({ top: messageLogRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [channelData, chan]);
+
+  useEffect(() => {
+    if (bootFrame === -1 || booted) return;
+    const maxFrames = 4; 
+    if (bootFrame >= maxFrames) {
+      setBooted(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setBootFrame(p => p + 1);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [bootFrame, booted]);
+
+  const getBootArrows = () => {
+    const step = bootFrame === -1 ? 0 : Math.min(bootFrame, 3);
+    const spaces = ' '.repeat((3 - step) * 2);
+    const leftPad = ' '.repeat(step * 2);
+    return `${leftPad}>>${spaces} INITIALIZE UPLINK ${spaces}<<${leftPad}`;
+  };
+
   useEffect(() => {
     const root = document.documentElement;
     const updateViewportHeight = () => {
@@ -277,11 +396,29 @@ export default function App() {
     const fetchModels = async () => {
       const currentKey = keys[activeProvider];
       setModelList([]);
-      if (!booted || !currentKey) return;
+      if (!booted) return;
+      if (!currentKey) {
+        setModelFetchStatusByProvider(prev => ({ ...prev, [activeProvider]: 'idle' }));
+        return;
+      }
+
+      setModelFetchStatusByProvider(prev => ({ ...prev, [activeProvider]: 'retrieving' }));
+      pushNetworkEvent(activeProvider, 'CONNECTING', 'RETRIEVING_MODELS');
       try {
         const res = await transmit(activeProvider, 'models', keys[activeProvider]);
 
-        if (!res.ok) throw new Error(`HTTP_${res.status}`);
+        if (!res.ok) {
+          setModelFetchStatusByProvider(prev => ({
+            ...prev,
+            [activeProvider]: (res.status === 401 || res.status === 403) ? 'invalid-key' : 'error'
+          }));
+          pushNetworkEvent(
+            activeProvider,
+            (res.status === 401 || res.status === 403) ? 'Connection failed' : 'Uplink error',
+            `HTTP ${res.status}`
+          );
+          throw new Error(`HTTP_${res.status}`);
+        }
 
         const data = await res.json();
         if (data.data) {
@@ -292,18 +429,30 @@ export default function App() {
           });
           const nextList = sorted.slice(0, 50);
           setModelList(nextList);
+          setModelFetchStatusByProvider(prev => ({ ...prev, [activeProvider]: 'ready' }));
+          pushNetworkEvent(activeProvider, 'CONNECTION_SUCCESS', `${nextList.length}_MODELS`);
           setModelByProvider(prev => {
             const current = prev[activeProvider] || '';
             const hasCurrent = current && nextList.some(m => m.id === current);
             const nextModel = hasCurrent ? current : (nextList[0]?.id || '');
             if (nextModel === current) return prev;
             localStorage.setItem(`ascii_model_${activeProvider}`, nextModel);
+            pushNetworkEvent(activeProvider, 'MODEL_SELECTED', nextModel);
             if (nextModel) void probeSelectedModel(activeProvider, nextModel, currentKey);
             return { ...prev, [activeProvider]: nextModel };
           });
         }
       } catch (e) { 
         setModelList([]);
+        const errMsg = String(e?.message || '');
+        const isHttpError = /^HTTP_\d+$/.test(errMsg);
+        setModelFetchStatusByProvider(prev => ({
+          ...prev,
+          [activeProvider]: errMsg.includes('HTTP_401') || errMsg.includes('HTTP_403') ? 'invalid-key' : (prev[activeProvider] === 'invalid-key' ? 'invalid-key' : 'error')
+        }));
+        if (!isHttpError) {
+          pushNetworkEvent(activeProvider, 'Network disconnected', errMsg || 'Check provider or internet');
+        }
         console.error("FETCH_ERR", e); 
       }
     };
@@ -320,6 +469,9 @@ export default function App() {
     if (chan === 'providers') {
       const newKeys = { ...keys, [activeProvider]: val };
       setKeys(newKeys);
+      setModelList([]);
+      setModelFetchStatusByProvider(prev => ({ ...prev, [activeProvider]: 'retrieving' }));
+      pushNetworkEvent(activeProvider, 'KEY_REGISTERED', 'CONNECTING');
       localStorage.setItem(`key_${activeProvider}`, val);
       playSystemSound('chirp');
       setChannelData(p => ({ ...p, logs: [...p.logs, { role: 'SYS', text: `KEY FOR ${activeProvider.toUpperCase()} REGISTERED.` }] }));
@@ -562,17 +714,10 @@ export default function App() {
     gap: '7px',
     gridAutoFlow: 'dense'
   };
-  const momentGridStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))',
-    gap: '10px',
-    alignItems: 'stretch'
-  };
   const summaryTopHit = lastMemoryContext?.[0];
-  const memoryCardOrder = ['summary', 'tools', 'viewer'];
+  const memoryCardOrder = ['live', 'summary', 'tools', 'viewer'];
   const moveFullscreenCard = (direction) => {
     if (!memoryFullscreenCard) return;
-    if (memoryFullscreenCard === 'live') return;
     const index = memoryCardOrder.indexOf(memoryFullscreenCard);
     if (index < 0) return;
     const nextIndex = (index + direction + memoryCardOrder.length) % memoryCardOrder.length;
@@ -642,8 +787,10 @@ export default function App() {
     if (momentId) pulseMomentSnap(momentId);
   };
   const getMomentWidgetStyle = (momentId) => ({
-    ...widgetCardStyle,
+    width: '100%',
+    marginBottom: 0,
     cursor: 'grab',
+    borderRadius: '18px',
     transform: draggedMomentId === momentId
       ? 'translateY(-7px) scale(1.015)'
       : snappedMomentId === momentId
@@ -653,7 +800,7 @@ export default function App() {
       ? '0 18px 30px rgba(0,0,0,0.32), 0 0 0 1px rgba(155,255,155,0.12) inset'
       : snappedMomentId === momentId
         ? 'inset 0 0 0 1px rgba(255,255,255,0.10), 0 6px 14px rgba(0,0,0,0.18)'
-        : widgetCardStyle.boxShadow,
+        : 'none',
     transition: 'transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease',
     opacity: draggedMomentId && draggedMomentId !== momentId ? 0.94 : 1,
     willChange: draggedMomentId === momentId ? 'transform' : 'auto'
@@ -678,15 +825,16 @@ export default function App() {
     </MemoryMomentCard>
   );
   const getDockMomentCards = (dockKey) => {
-    if (dockKey === 'nav') {
+    if (dockKey === 'terminal') {
       return {
         live: liveMemoryCard,
+        summary: summaryMemoryCard,
+        tools: toolsMemoryCard,
+        viewer: viewerMemoryCard
       };
     }
     return {
-      summary: summaryMemoryCard,
-      tools: toolsMemoryCard,
-      viewer: viewerMemoryCard
+      live: liveMemoryCard
     };
   };
   const getDockMomentOrder = (dockKey) => (momentDockOrder[dockKey] || []).filter((id) => getDockMomentCards(dockKey)[id]);
@@ -737,9 +885,51 @@ export default function App() {
       onDrop={(e) => handleMomentDrop(e, 'tools', 'terminal')}
       dragged={draggedMomentId === 'tools'}
       snapped={snappedMomentId === 'tools'}
+      style={{ minWidth: '248px', minHeight: '248px' }}
     >
       <div style={{ display: 'grid', gap: '6px', overflowY: 'auto', height: '100%' }}>
-        <input ref={legacyInputRef} type="file" accept=".json,application/json" style={{ width: '100%', fontSize: '9px', color: '#ccc' }} />
+        <input
+          ref={legacyInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            setSelectedLegacyFileName(file?.name || '');
+          }}
+          style={{ display: 'none' }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={() => legacyInputRef.current?.click()}
+            style={{
+              flex: '0 0 auto',
+              padding: '6px 8px',
+              background: '#111',
+              color: '#ccc',
+              border: '1px solid #333',
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              fontSize: '9px'
+            }}
+          >
+            CHOOSE FILE
+          </button>
+          <div
+            title={selectedLegacyFileName || 'NO_FILE_SELECTED'}
+            style={{
+              minWidth: 0,
+              flex: 1,
+              fontSize: '9px',
+              color: '#888',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
+            {selectedLegacyFileName || 'NO_FILE_SELECTED'}
+          </div>
+        </div>
         <button type="button" onClick={handleLegacyImport} style={{ width: '100%', padding: '6px 8px', background: '#111', color: '#ffaa00', border: '1px solid #333', cursor: 'pointer', fontFamily: 'monospace', fontSize: '9px' }}>IMPORT LEGACY JSON</button>
         <button type="button" onClick={handleLegacyPurge} style={{ width: '100%', padding: '6px 8px', background: '#1a0909', color: '#ff4444', border: '1px solid #442222', cursor: 'pointer', fontFamily: 'monospace', fontSize: '9px' }}>PURGE LEGACY ROWS</button>
         <div style={{ marginTop: '2px', fontSize: '9px', color: '#666', wordBreak: 'break-word' }}>{migrationStatus || 'LOAD memory_for_dexie.json'}</div>
@@ -758,6 +948,7 @@ export default function App() {
       onDrop={(e) => handleMomentDrop(e, 'viewer', 'terminal')}
       dragged={draggedMomentId === 'viewer'}
       snapped={snappedMomentId === 'viewer'}
+      style={{ minWidth: '240px', minHeight: '240px' }}
     >
       <button type="button" onClick={() => void loadMemoryPreview()} style={{ width: '100%', padding: '6px 8px', background: '#111', color: '#78b8ff', border: '1px solid #333', cursor: 'pointer', fontFamily: 'monospace', fontSize: '9px', marginBottom: '6px' }}>REFRESH VIEW</button>
       <div style={{ marginBottom: '6px', fontSize: '9px', color: '#666' }}>{memoryViewStatus} / {memoryCount} RECORDS</div>
@@ -790,37 +981,56 @@ export default function App() {
       </div>
     </MemoryMomentCard>
   );
+  const momentRailItems = getDockMomentOrder('terminal').map((id) => ({
+    id,
+    aspectRatio: id === 'tools' ? 1.35 : (id === 'viewer' ? 1.25 : 1)
+  }));
+  const fullscreenCardStyle = {
+    minHeight: '100%',
+    height: '100%',
+    aspectRatio: 'auto'
+  };
+  const renderFullscreenMemoryCard = () => {
+    const fullscreenCards = {
+      live: liveMemoryCard,
+      summary: summaryMemoryCard,
+      tools: toolsMemoryCard,
+      viewer: viewerMemoryCard
+    };
+    const selected = fullscreenCards[memoryFullscreenCard];
+    if (!selected) return null;
+
+    return cloneElement(selected, {
+      draggable: false,
+      onDragStart: undefined,
+      onDragEnd: undefined,
+      onDragOver: undefined,
+      onDrop: undefined,
+      dragged: false,
+      snapped: false,
+      style: {
+        ...(selected.props?.style || {}),
+        ...fullscreenCardStyle
+      }
+    });
+  };
   const memoryPanels = (
     <JustifiedMasonry
-      items={getDockMomentOrder('terminal')}
-      targetRowHeight={202}
-      itemSpacing={24}
-      rowSpacing={24}
-      getId={(momentId) => momentId}
-      getAspectRatio={() => 1}
-      renderItem={(momentId) => renderDockMomentTile(momentId, 'terminal')}
-    />
-  );
-  const navMemoryPanels = (
-    <JustifiedMasonry
-      items={getDockMomentOrder('nav')}
-      targetRowHeight={202}
-      itemSpacing={24}
-      rowSpacing={24}
-      getId={(momentId) => momentId}
-      getAspectRatio={() => 1}
-      renderItem={(momentId) => renderDockMomentTile(momentId, 'nav')}
+      items={momentRailItems}
+      targetRowHeight={isDrawerMode ? 104 : 128}
+      itemSpacing={8}
+      rowSpacing={8}
+      getId={(item) => item.id}
+      getAspectRatio={(item) => item.aspectRatio}
+      renderItem={(item) => renderDockMomentTile(item.id, 'terminal')}
     />
   );
 
   if (!booted) {
     return (
       <>
-        <div className="boot-screen" onClick={() => { 
-          setupAudio(); // This initializes the context safely inside the module
-          setBooted(true); 
-        }} style={{ height: 'var(--app-height, 100vh)', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
-          <pre>{`[ WAYLAND-YUTANI CYBERDEC ]\n[ MU/TH/UR 6000 ]\n\n>> INITIALIZE UPLINK <<`}</pre>
+        <div className="boot-screen" onClick={() => setupAudio()} style={{ height: 'var(--app-height, 100vh)', backgroundColor: '#000', color: '#00ff00', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'monospace' }}>
+          <pre style={{ textAlign: 'center' }}>{`[ WAYLAND-YUTANI CYBERDEC ]\n[ MU/TH/UR 6000 ]\n\n${getBootArrows()}`}</pre>
         </div>
       </>
     );
@@ -828,10 +1038,10 @@ export default function App() {
 
   return (
     <>
-      <div className="ui-wrapper terminal-window" onClick={() => setupAudio()} style={{ backgroundColor: '#000', color: '#00ff00', height: 'var(--app-height, 100vh)', display: 'flex', fontFamily: 'monospace', overflow: 'hidden', fontSize: '14px' }}>
+      <div className="flex h-screen overflow-hidden bg-gray-950 text-green-500 antialiased terminal-window" onClick={() => setupAudio()} style={{ height: 'var(--app-height, 100vh)', fontFamily: 'monospace' }}>
       
       {/* COL 1: SERVERS */}
-      <div className="sidebar-servers" style={{ width: '72px', borderRight: '1px solid #1a1a1a', padding: '10px 6px', gap: '14px', display: 'flex', flexDirection: 'column' }}>
+      <aside className="flex flex-col items-center flex-shrink-0 w-16 border-r border-gray-800 bg-gray-900 py-4 z-40 relative">
         {[
           { id: 'm', glyph: 'Ø' },
           { id: 's', glyph: 'μ' }
@@ -839,7 +1049,18 @@ export default function App() {
           <div key={button.id} className="btn-container" style={{ width: '56px', height: '52px', position: 'relative' }}>
             <pre
               className={`ascii-btn${server === button.id ? ' is-pushed' : ''}`}
-              onClick={() => { setServer(button.id); setChan(button.id === 'm' ? 'agenda' : 'providers'); playSystemSound('chirp'); }}
+              onClick={() => { 
+                if (isDrawerMode) {
+                  setDrawerProgress(1);
+                }
+                if (server !== button.id) {
+                  setServer(button.id); 
+                  setChan(button.id === 'm' ? 'agenda' : 'providers'); 
+                  playSystemSound('chirp'); 
+                } else {
+                  playSystemSound('click', 0.05);
+                }
+              }}
               style={{
                 position: 'absolute',
                 inset: 0,
@@ -853,56 +1074,138 @@ export default function App() {
             </pre>
           </div>
         ))}
-      </div>
+      </aside>
 
       {/* COL 2: NAV */}
-      <div
+      <aside
         ref={navColumnRef}
-        className={`sidebar-channels${isDrawerMode ? ' sidebar-drawer' : ''}`}
-        style={navDrawerStyle}
+        className={`flex-col flex-shrink-0 w-64 border-r border-gray-800 bg-gray-900 transition-all duration-300 ${isDrawerMode ? (drawerProgress > 0.5 ? 'flex absolute h-full z-30 ml-16 shadow-2xl' : 'hidden') : 'flex'} overflow-y-auto custom-scrollbar`}
       >
-        <div style={{ color: '#8a8a8a', fontSize: '10px', marginBottom: '10px', letterSpacing: '0.04em' }}>{server === 'm' ? 'ØPERATOR' : 'MAINNET-UPLINK'}</div>
+        <div className="p-4 relative">
+        {isDrawerMode && (
+          <>
+            <div 
+              onPointerDown={handleDrawerPointerDown} 
+              style={{ position: 'absolute', right: 0, top: '40px', bottom: 0, width: '20px', cursor: 'ew-resize', zIndex: 10 }}
+            />
+          </>
+        )}
+        <div style={{ color: '#8a8a8a', fontSize: '10px', marginBottom: '10px', letterSpacing: '0.04em', paddingRight: '24px' }}>{server === 'm' ? 'ØPERATOR' : 'MAINNET-UPLINK'}</div>
         {server === 'm' ? (
           ['agenda', 'intel', 'logs'].map(c => (
-            <div key={c} onClick={() => { setChan(c); playSystemSound('click'); }} style={{ cursor: 'pointer', color: chan === c ? '#00ff00' : '#333', padding: '8px 0' }}>{chan === c ? '> ' : '# '}{c.toUpperCase()}</div>
+            <div
+              key={c}
+              onClick={() => {
+                const isSelected = chan === c;
+                handleRowClick('chan-' + c, isSelected, () => {
+                  if (isDrawerMode && isSelected) {
+                    setDrawerProgress(0);
+                    return;
+                  }
+                  setChan(c);
+                  playSystemSound('click');
+                  if (isDrawerMode) setDrawerProgress(0);
+                });
+              }}
+              className={pressedRowId === 'chan-' + c ? 'nav-row pressed' : 'nav-row'}
+              style={{
+                cursor: 'pointer',
+                '--nav-color': chan === c ? '#00ff00' : inactiveTextColor,
+                '--nav-shadow': chan === c ? activeTextGlow : inactiveTextGlow,
+                '--nav-hover-color': chan === c ? '#36ff73' : '#b0b0b0',
+                '--nav-hover-shadow': chan === c ? '0 0 10px rgba(54, 255, 115, 0.30)' : inactiveTextGlow,
+                paddingTop: '8px',
+                paddingBottom: '8px'
+              }}
+            >
+              {chan === c ? '> ' : '# '}{c.toUpperCase()}
+            </div>
           ))
         ) : (
           <>
-            <div onClick={() => { setChan('providers'); playSystemSound('click'); }} style={{ cursor: 'pointer', color: chan === 'providers' ? '#00ff00' : '#333', padding: '8px 0' }}># GATEWAY</div>
+            <div onClick={() => { setChan('providers'); playSystemSound('click'); if (isDrawerMode) setDrawerProgress(0); }} className="nav-row" style={{ cursor: 'pointer', '--nav-color': chan === 'providers' ? '#00ff00' : inactiveTextColor, '--nav-shadow': chan === 'providers' ? activeTextGlow : inactiveTextGlow, '--nav-hover-color': chan === 'providers' ? '#36ff73' : '#b0b0b0', '--nav-hover-shadow': chan === 'providers' ? '0 0 10px rgba(54, 255, 115, 0.30)' : inactiveTextGlow, paddingTop: '8px', paddingBottom: '8px' }}># GATEWAY</div>
             {providers.map(p => (
-              <div key={p} onClick={() => { setActiveProvider(p); localStorage.setItem('active_provider', p); playSystemSound('chirp'); }} style={{ cursor: 'pointer', color: activeProvider === p ? '#00ff00' : '#222', padding: '5px 0' }}>{activeProvider === p ? '[X] ' : '[ ] '}{p.toUpperCase()}</div>
+              <div 
+                key={p} 
+                onClick={() => { 
+                  setActiveProvider(p); 
+                  localStorage.setItem('active_provider', p); 
+                  playSystemSound('chirp'); 
+                  if (isDrawerMode) setDrawerProgress(0);
+                  if (!keys[p]) {
+                    setChannelData(prev => ({ 
+                      ...prev, 
+                      providers: [...(prev.providers || []), { role: 'SYS', text: `ENTER ${p.toUpperCase()} KEY BELOW.` }] 
+                    }));
+                  }
+                }} 
+                className="nav-row"
+                style={{ cursor: 'pointer', '--nav-color': activeProvider === p ? '#00ff00' : inactiveSubtleTextColor, '--nav-shadow': activeProvider === p ? activeTextGlow : inactiveTextGlow, '--nav-hover-color': activeProvider === p ? '#36ff73' : '#b0b0b0', '--nav-hover-shadow': activeProvider === p ? '0 0 10px rgba(54, 255, 115, 0.30)' : inactiveTextGlow, paddingTop: '5px', paddingBottom: '5px' }}
+              >
+                {activeProvider === p ? '[X] ' : '[ ] '}{p.toUpperCase()}
+              </div>
             ))}
-            <div style={{ marginTop: '20px', borderTop: '1px solid #111', paddingTop: '10px' }}>
-                <div style={{ fontSize: '10px', color: '#444', marginBottom: '10px' }}>AVAILABLE_MODELS:</div>
-                {!keys[activeProvider] ? (
-                  <div style={{ color: '#444', fontSize: '10px', lineHeight: 1.4 }}>
-                    ENTER A KEY ABOVE TO LOAD {activeProvider.toUpperCase()} MODELS.
+            <div style={{ marginTop: '20px', borderTop: '1px solid #111', paddingTop: '10px', pointerEvents: probeInFlightByProvider[activeProvider] ? 'none' : 'auto', opacity: probeInFlightByProvider[activeProvider] ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+                <div style={{ fontSize: '10px', color: inactiveTextColor, textShadow: inactiveTextGlow, marginBottom: '10px' }}>AVAILABLE_MODELS:</div>
+                {!keys[activeProvider] ? null : providerModelFetchStatus === 'retrieving' ? (
+                  <div className="model-probe-wave" style={{ color: '#ffaa00', textShadow: amberTextGlow, fontSize: '10px' }}>
+                    CONNECTING... RETRIEVING_MODELS
+                  </div>
+                ) : providerModelFetchStatus === 'invalid-key' ? (
+                  <div style={{ color: '#ff5555', textShadow: '0 0 8px rgba(255, 85, 85, 0.3)', fontSize: '10px' }}>
+                    INVALID_KEY // AUTH_REJECTED
+                  </div>
+                ) : providerModelFetchStatus === 'error' ? (
+                  <div style={{ color: '#ff7a7a', textShadow: '0 0 8px rgba(255, 122, 122, 0.3)', fontSize: '10px' }}>
+                    UPLINK_ERROR // RETRY
                   </div>
                 ) : modelList.length === 0 ? (
-                  <div style={{ color: '#444', fontSize: '10px' }}>
+                  <div style={{ color: inactiveTextColor, textShadow: inactiveTextGlow, fontSize: '10px' }}>
                     NO_MODELS_LOADED
                   </div>
                 ) : (
                   modelList.map(m => (
                     <div
                       key={m.id}
+                      className={probeInFlightByProvider[activeProvider] === m.id ? 'model-probe-wave' : 'nav-row'}
                       onClick={() => {
+                        const prevModel = modelByProvider[activeProvider] || '';
                         setModelByProvider(prev => ({ ...prev, [activeProvider]: m.id }));
                         localStorage.setItem(`ascii_model_${activeProvider}`, m.id);
+                        pushNetworkEvent(activeProvider, prevModel && prevModel !== m.id ? 'MODEL_CHANGED' : 'MODEL_SELECTED', m.id);
                         playSystemSound('click');
+                        if (isDrawerMode) setDrawerProgress(0);
                         void probeSelectedModel(activeProvider, m.id, keys[activeProvider]);
                       }}
                       style={{
                         cursor: 'pointer',
-                        color: modelID === m.id
+                        '--nav-color': modelID === m.id
                           ? (modelHealthByProvider[activeProvider]?.[m.id] === 'green'
                             ? '#00ff00'
                             : (modelHealthByProvider[activeProvider]?.[m.id] === 'amber'
                               ? '#ffaa00'
-                              : '#444'))
-                          : (m.id.includes('free') ? '#ffaa00' : '#222'),
+                              : inactiveTextColor))
+                          : (m.id.includes('free') ? '#ffaa00' : inactiveSubtleTextColor),
+                        '--nav-shadow': modelID === m.id
+                          ? (modelHealthByProvider[activeProvider]?.[m.id] === 'green'
+                            ? activeTextGlow
+                            : (modelHealthByProvider[activeProvider]?.[m.id] === 'amber'
+                              ? amberTextGlow
+                              : inactiveTextGlow))
+                          : (m.id.includes('free') ? amberTextGlow : inactiveTextGlow),
+                        '--nav-hover-color': modelID === m.id
+                          ? (modelHealthByProvider[activeProvider]?.[m.id] === 'green' ? '#36ff73' : '#ffbf4d')
+                          : '#b0b0b0',
+                        '--nav-hover-shadow': modelID === m.id
+                          ? (modelHealthByProvider[activeProvider]?.[m.id] === 'green'
+                            ? '0 0 10px rgba(54, 255, 115, 0.30)'
+                            : '0 0 10px rgba(255, 191, 77, 0.28)')
+                          : inactiveTextGlow,
+                        color: 'var(--nav-color)',
+                        textShadow: 'var(--nav-shadow)',
                         fontSize: '10px',
-                        padding: '4px 0',
+                        paddingTop: '4px',
+                        paddingBottom: '4px',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap'
@@ -915,29 +1218,30 @@ export default function App() {
             </div>
           </>
         )}
-        {server === 'm' && (
-          <div style={{ marginTop: '18px', borderTop: '1px solid #111', paddingTop: '12px' }}>
-            <div style={{ color: '#444', fontSize: '10px', marginBottom: '12px', letterSpacing: '0.08em' }}>MOMENTS_GRID</div>
-            {navMemoryPanels}
-          </div>
-        )}
-      </div>
+        </div>
+      </aside>
 
       {/* COL 3: TERMINAL */}
-      <div className="chat-area" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px' }}>
-        <div
-          className={isActivelyProbing ? 'model-probe-wave' : ''}
-          style={{ color: providerTint, fontSize: '10px', marginBottom: '20px' }}
-        >
-          {activeProvider.toUpperCase()} // {secondColumnSelectionLabel} // {modelID || 'NO_MODEL'}
-        </div>
-
-        {server === 'm' && chan === 'intel' && (
-          <div style={{ marginBottom: '18px', marginTop: '2px' }}>
-            <div style={{ color: '#444', fontSize: '10px', marginBottom: '12px', letterSpacing: '0.08em' }}>MOMENTS_GRID</div>
-            {memoryPanels}
+      <main
+        className="flex flex-col flex-1 min-w-0 bg-black"
+        onClick={() => {
+          if (isDrawerMode && drawerProgress > 0.5) {
+            setDrawerProgress(0);
+          }
+        }}
+      >
+        <header className="flex items-center h-16 px-6 border-b border-gray-800 bg-gray-900/50 backdrop-blur-md">
+          <div
+            className={isActivelyProbing || isRetrievingModels ? 'model-probe-wave' : ''}
+            style={{ color: providerTint, textShadow: providerTintGlow, fontSize: '10px' }}
+          >
+            {activeProvider.toUpperCase()} // {secondColumnSelectionLabel} // {modelID || 'NO_MODEL'}
           </div>
-        )}
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col pt-6">
+
+        {server === 'm' && chan === 'intel' && memoryPanels}
 
         <div
           ref={messageLogRef}
@@ -949,16 +1253,20 @@ export default function App() {
           ))}
           <div ref={chatEndRef} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid #1a1a1a', paddingTop: '8px', minHeight: '40px' }}>
-          <span style={{ marginRight: '10px' }}>{'>'}</span>
-          <input 
-            ref={inputRef} value={input} 
-            onChange={(e) => { setInput(e.target.value); playSystemSound('click', 0.04); }} 
-            onKeyDown={handleSend} placeholder={chan === 'providers' ? "ENTER GATEWAY KEY..." : "MESSAGE MU/TH/UR..."} 
-            style={{ background: 'none', border: 'none', color: '#00ff00', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '14px', lineHeight: '20px', height: '22px' }} 
-          />
         </div>
-      </div>
+        
+        <footer className="p-4 bg-gray-900/80 border-t border-gray-800">
+          <div className="relative flex items-center">
+            <span className="absolute left-4 text-green-500 font-bold text-lg">$</span>
+            <input 
+              ref={inputRef} value={input} 
+              onChange={(e) => { setInput(e.target.value); playSystemSound('click', 0.04); }} 
+              onKeyDown={handleSend} placeholder={chan === 'providers' ? "ENTER GATEWAY KEY..." : "Enter command or message..."} 
+              className="w-full bg-black border border-gray-700 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-green-500 text-green-400 placeholder-gray-700 transition-all font-mono text-sm"
+            />
+          </div>
+        </footer>
+      </main>
       </div>
 
       {memoryFullscreenCard && server === 'm' && chan === 'intel' && (
@@ -971,7 +1279,7 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '20px'
+            padding: '8px'
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -980,53 +1288,62 @@ export default function App() {
         >
           <div
             style={{
-              width: 'min(1100px, 100%)',
-              maxHeight: '100%',
-              overflow: 'auto',
+              width: 'min(1400px, 100%)',
+              height: 'calc(100% - 8px)',
+              maxHeight: 'calc(100% - 8px)',
+              overflow: 'hidden',
               border: '1px solid #1f1f1f',
-              borderRadius: '16px',
+              borderRadius: '8px',
               background: '#050505',
-              padding: '18px'
+              padding: '10px',
+              display: 'flex',
+              flexDirection: 'column'
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
       <div style={{ color: '#9bff9b', fontSize: '10px', letterSpacing: '0.08em' }}>
-        {memoryFullscreenCard === 'live' ? 'LIVE_HANGOUT_FULLSCREEN' : `MEMORY_${String(memoryFullscreenCard || '').toUpperCase()}_FULLSCREEN`}
+        {memoryFullscreenCard === 'live' ? 'LIVE_HANGOUT' : `MEMORY_${String(memoryFullscreenCard || '').toUpperCase()}`}
       </div>
       <div style={{ display: 'flex', gap: '6px' }}>
-        {memoryFullscreenCard !== 'live' && (
-          <>
-            <button
-              type="button"
-              onClick={() => moveFullscreenCard(-1)}
-              style={{ padding: '6px 10px', background: '#111', color: '#78b8ff', border: '1px solid #2a2a2a', cursor: 'pointer', fontFamily: 'monospace', fontSize: '10px' }}
-            >
-              PREV
-            </button>
-            <button
-              type="button"
-              onClick={() => moveFullscreenCard(1)}
-              style={{ padding: '6px 10px', background: '#111', color: '#78b8ff', border: '1px solid #2a2a2a', cursor: 'pointer', fontFamily: 'monospace', fontSize: '10px' }}
-            >
-              NEXT
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => moveFullscreenCard(-1)}
+          aria-label="Previous card"
+          title="Previous"
+          style={{ padding: '6px 10px', background: '#111', color: '#78b8ff', border: '1px solid #2a2a2a', cursor: 'pointer', fontFamily: 'monospace', fontSize: '10px' }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => moveFullscreenCard(1)}
+          aria-label="Next card"
+          title="Next"
+          style={{ padding: '6px 10px', background: '#111', color: '#78b8ff', border: '1px solid #2a2a2a', cursor: 'pointer', fontFamily: 'monospace', fontSize: '10px' }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={() => setMemoryFullscreenCard(null)}
+          aria-label="Close fullscreen"
+          title="Close"
           style={{ padding: '6px 10px', background: '#111', color: '#9bff9b', border: '1px solid #2a2a2a', cursor: 'pointer', fontFamily: 'monospace', fontSize: '10px' }}
         >
-          CLOSE
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
         </button>
       </div>
             </div>
-            <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-              {memoryFullscreenCard === 'live' && liveMemoryCard}
-              {memoryFullscreenCard === 'summary' && summaryMemoryCard}
-              {memoryFullscreenCard === 'tools' && toolsMemoryCard}
-              {memoryFullscreenCard === 'viewer' && viewerMemoryCard}
+            <div style={{ width: '100%', minHeight: 0, flex: 1 }}>
+              {renderFullscreenMemoryCard()}
             </div>
           </div>
         </div>
@@ -1035,3 +1352,4 @@ export default function App() {
     </>
   );
 }
+

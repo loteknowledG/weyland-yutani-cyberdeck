@@ -6,6 +6,7 @@ The harness and memory contract live in the sibling repo:
 
 - `..\cognosys\AGENTS.md`
 - `..\cognosys\docs\COGNOSYS_MEMORY_ARCHITECTURE.md`
+- `..\cognosys\docs\RUNTIMES.md`
 
 ## Start Here
 
@@ -18,4 +19,5 @@ The harness and memory contract live in the sibling repo:
 - UI shell and moments grid
 - dockable memory widgets
 - local product behavior
+- runtime routing is delegated to Cognosys
 - keeping the harness contract separate from the app shell
