@@ -5,11 +5,14 @@
   "description": "",
   "main": "main.cjs",
   "scripts": {
+    "voice:warp-spider": "powershell -NoProfile -Command \"$env:CODEX_LOCAL_VOICE='Microsoft Zira Desktop - English (United States)'; $env:CODEX_EFFECT_PRESET='warp-clean'; node c:/dev/samus-manus/codex-voice/index.js --provider local --mode full\"",
     "dev": "vite --host 127.0.0.1 --port 3000",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3000",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "tts-natasha": "node tts-natasha.js",
+    "tts-natasha-play": "node tts-natasha-play.js"
   },
   "keywords": [],
   "author": "",
@@ -17,8 +20,11 @@
   "packageManager": "pnpm@10.32.1",
   "dependencies": {
     "dexie": "^4.4.2",
+    "just-bash": "^2.14.2",
+    "play-sound": "^1.1.6",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",

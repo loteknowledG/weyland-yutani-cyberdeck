@@ -104,20 +104,28 @@ body::before {
   color: #36ff73;
   text-shadow: 0 0 12px rgba(54, 255, 115, 0.38);
 }
-.ascii-btn {
+
+.ascii-btn, button {
   color: var(--inactive);
   line-height: 1.05;
   font-size: 11px;
   margin: 0;
   white-space: pre; /* CRITICAL: This keeps the ASCII shape */
-  transition: transform 90ms ease, color 90ms ease, text-shadow 90ms ease, opacity 90ms ease;
+  transition: transform 90ms cubic-bezier(.4,2,.6,1), color 90ms ease, text-shadow 90ms ease, opacity 90ms ease, box-shadow 90ms ease;
   opacity: 0.82;
+  box-shadow: 2px 2px 0 0 #222;
 }
-.is-pushed { 
-  color: var(--active); 
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.55);
+
+/* Enhanced pressed/active state for all main action buttons */
+.is-pushed, 
+button:active, 
+button[aria-pressed="true"], 
+.ascii-btn:active {
+  color: var(--active);
+  text-shadow: none; /* Remove glow/shadow when pressed */
   opacity: 1;
-  transform: translate(3px, 3px);
+  transform: translate(2px, 2px); /* Move to match shadow offset */
+  box-shadow: none !important; /* Remove any box-shadow on press */
 }
 
 /* COLUMN 2: CHANNELS */

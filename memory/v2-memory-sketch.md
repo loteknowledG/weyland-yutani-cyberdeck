@@ -1,0 +1,1 @@
+(copy from samus-manus/memory/v2-memory-sketch.md)

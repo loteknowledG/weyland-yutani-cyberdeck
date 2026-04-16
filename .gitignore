@@ -138,3 +138,4 @@ dist
 # ReCode local database
 .recode
 .recode/changes.db
+/.playwright-cli
