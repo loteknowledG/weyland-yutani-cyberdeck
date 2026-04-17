@@ -18,6 +18,8 @@ The harness and memory contract live in the sibling repo:
 
 - UI shell and moments grid
 - dockable memory widgets
+- remembered images and embedding-backed retrieval
 - local product behavior
 - runtime routing is delegated to Cognosys
 - keeping the harness contract separate from the app shell
+- voice playback uses remote TTS when reachable, then falls back to browser speech synthesis

@@ -30,3 +30,18 @@ This document captures the glyph-first cyberdeck concept: a low-text, symbol-dri
 ## Cyberdeck intent
 
 This is a machine-manifold UI for the future: a Weyland Yutani glyph interface that minimizes typing, maximizes symbol recognition, and treats page items as glyph objects.
+
+## Hardware trajectory
+
+- The cyberdeck is a survival computer first.
+- The long-term goal is a real self-contained hardware unit, not just a software shell.
+- Treat the current project as the UI and behavior prototype for that eventual commercial / military-grade device.
+- Keep the design rugged, modular, and human-operable under pressure.
+- Preserve the references that point toward the hardware shape of the machine:
+  - the Hackster Weyland-style Atari cyberdeck build
+  - the 3D-printed Weyland Corp cyberdeck reference
+  - the Imgur Weyland Corp edition cyberdeck album
+
+## Related Interfaces
+
+- [Real Time Crisis Manifold](./REAL_TIME_CRISIS_MANIFOLD.md)

@@ -13,39 +13,72 @@ import MemoryMomentCard from "./components/MemoryMomentCard";
 import JustifiedMasonry from "./components/JustifiedMasonry";
 import TerminalColumn from "./components/TerminalColumn";
 import MemoryFullscreenOverlay from "./components/MemoryFullscreenOverlay";
+import VoiceFlowPanel from "./components/VoiceFlowPanel";
+
+const APP_STATE_KEY = "wyc_app_state_v1";
+
+function loadAppState() {
+  try {
+    if (typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem(APP_STATE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAppState(state) {
+  try {
+    window.localStorage.setItem(APP_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures and keep the app running.
+  }
+}
 
 export default function App() {
-  const [booted, setBooted] = useState(false);
-  const [bootFrame, setBootFrame] = useState(0);
-  const [server, setServer] = useState("m");
-  const [chan, setChan] = useState("agenda");
-  const [input, setInput] = useState("");
-  const [channelData, setChannelData] = useState({
-    agenda: [],
-    intel: [],
-    logs: [],
-    providers: [],
-    "samus-manus": [],
-  });
+  const persistedState = loadAppState();
+  const booted = true;
+  const [server, setServer] = useState(() => persistedState.server || "m");
+  const [chan, setChan] = useState(
+    () => persistedState.chan || "agenda",
+  );
+  const [input, setInput] = useState(() => persistedState.input || "");
+  const [channelData, setChannelData] = useState(
+    () =>
+      persistedState.channelData || {
+        agenda: [],
+        intel: [],
+        logs: [],
+        providers: [],
+        "samus-manus": [],
+      },
+  );
   const [modelList, setModelList] = useState([]);
 
   // OPENCODE ADDED TO PROVIDERS
   const providers = ["opencode", "openrouter", "openai"];
   const [activeProvider, setActiveProvider] = useState(
-    localStorage.getItem("active_provider") || "opencode",
+    () =>
+      persistedState.activeProvider ||
+      localStorage.getItem("active_provider") ||
+      "opencode",
   );
 
   const [keys, setKeys] = useState({
-    opencode: localStorage.getItem("key_opencode") || "",
-    openrouter: localStorage.getItem("key_openrouter") || "",
-    openai: localStorage.getItem("key_openai") || "",
+    ...(persistedState.keys || {
+      opencode: localStorage.getItem("key_opencode") || "",
+      openrouter: localStorage.getItem("key_openrouter") || "",
+      openai: localStorage.getItem("key_openai") || "",
+    }),
   });
 
-  const [modelByProvider, setModelByProvider] = useState(() => ({
-    opencode: localStorage.getItem("ascii_model_opencode") || "",
-    openrouter: localStorage.getItem("ascii_model_openrouter") || "",
-    openai: localStorage.getItem("ascii_model_openai") || "",
-  }));
+  const [modelByProvider, setModelByProvider] = useState(() =>
+    persistedState.modelByProvider || {
+      opencode: localStorage.getItem("ascii_model_opencode") || "",
+      openrouter: localStorage.getItem("ascii_model_openrouter") || "",
+      openai: localStorage.getItem("ascii_model_openai") || "",
+    },
+  );
   const [modelHealthByProvider, setModelHealthByProvider] = useState(() => ({
     opencode: {},
     openrouter: {},
@@ -65,31 +98,64 @@ export default function App() {
       openai: "",
     }),
   );
-  const [networkEvents, setNetworkEvents] = useState([]);
-  const [migrationStatus, setMigrationStatus] = useState("");
-  const [selectedLegacyFileName, setSelectedLegacyFileName] = useState("");
-  const [memoryCount, setMemoryCount] = useState(0);
-  const [memoryPreview, setMemoryPreview] = useState([]);
-  const [memorySearch, setMemorySearch] = useState("");
-  const [memorySearchResults, setMemorySearchResults] = useState([]);
-  const [memoryViewStatus, setMemoryViewStatus] = useState("VIEW_NOT_LOADED");
-  const [lastMemoryContext, setLastMemoryContext] = useState([]);
-  const [memoryCollapsed, setMemoryCollapsed] = useState(
-    () => window.matchMedia?.("(orientation: portrait)")?.matches ?? false,
+  const [lastMemoryContext, setLastMemoryContext] = useState(
+    () => persistedState.lastMemoryContext || [],
   );
-  const [memoryFullscreenCard, setMemoryFullscreenCard] = useState(null);
+  const [memoryCollapsed, setMemoryCollapsed] = useState(
+    () =>
+      persistedState.memoryCollapsed ??
+      (window.matchMedia?.("(orientation: portrait)")?.matches ?? false),
+  );
+  const [memoryFullscreenCard, setMemoryFullscreenCard] = useState(
+    () => persistedState.memoryFullscreenCard ?? null,
+  );
   const [momentDockOrder, setMomentDockOrder] = useState(() => ({
-    nav: [],
-    terminal: ["live", "summary", "tools", "viewer"],
+    nav: persistedState.momentDockOrder?.nav || [],
+    terminal:
+      persistedState.momentDockOrder?.terminal || [
+        "live",
+        "summary",
+        "tools",
+        "viewer",
+      ],
+    "samus-manus":
+      persistedState.momentDockOrder?.["samus-manus"] || ["voice", "speak"],
   }));
   const [draggedMomentId, setDraggedMomentId] = useState(null);
   const [snappedMomentId, setSnappedMomentId] = useState(null);
   const [isDrawerMode, setIsDrawerMode] = useState(
     () => window.matchMedia?.("(max-width: 980px)")?.matches ?? false,
   );
-  const [drawerProgress, setDrawerProgress] = useState(0);
+  const [drawerProgress, setDrawerProgress] = useState(
+    () => persistedState.drawerProgress ?? 0,
+  );
   const [drawerDragging, setDrawerDragging] = useState(false);
   const [pressedRowId, setPressedRowId] = useState(null);
+  const [networkEvents, setNetworkEvents] = useState(
+    () => persistedState.networkEvents || [],
+  );
+  const [migrationStatus, setMigrationStatus] = useState(
+    () => persistedState.migrationStatus || "",
+  );
+  const [imageMemoryStatus, setImageMemoryStatus] = useState("");
+  const [selectedLegacyFileName, setSelectedLegacyFileName] = useState(
+    () => persistedState.selectedLegacyFileName || "",
+  );
+  const [memoryCount, setMemoryCount] = useState(
+    () => persistedState.memoryCount ?? 0,
+  );
+  const [memoryPreview, setMemoryPreview] = useState(
+    () => persistedState.memoryPreview || [],
+  );
+  const [memorySearch, setMemorySearch] = useState(
+    () => persistedState.memorySearch || "",
+  );
+  const [memorySearchResults, setMemorySearchResults] = useState(
+    () => persistedState.memorySearchResults || [],
+  );
+  const [memoryViewStatus, setMemoryViewStatus] = useState(
+    () => persistedState.memoryViewStatus || "VIEW_NOT_LOADED",
+  );
   const messageLogRef = useRef(null);
   const chatEndRef = useRef(null);
   const navColumnRef = useRef(null);
@@ -102,6 +168,7 @@ export default function App() {
   const snapPulseRef = useRef(null);
   const inputRef = useRef(null);
   const legacyInputRef = useRef(null);
+  const imageMemoryInputRef = useRef(null);
   const modelID = modelByProvider[activeProvider] || "";
   const providerReady = Boolean(keys[activeProvider]);
   const isActivelyProbing =
@@ -237,6 +304,54 @@ export default function App() {
       },
     }));
   };
+
+  useEffect(() => {
+    saveAppState({
+      booted,
+      server,
+      chan,
+      input,
+      channelData,
+      activeProvider,
+      keys,
+      modelByProvider,
+      memoryCollapsed,
+      memoryFullscreenCard,
+      momentDockOrder,
+      drawerProgress,
+      networkEvents,
+      migrationStatus,
+      selectedLegacyFileName,
+      memoryCount,
+      memoryPreview,
+      memorySearch,
+      memorySearchResults,
+      memoryViewStatus,
+      lastMemoryContext,
+    });
+  }, [
+    booted,
+    server,
+    chan,
+    input,
+    channelData,
+    activeProvider,
+    keys,
+    modelByProvider,
+    memoryCollapsed,
+    memoryFullscreenCard,
+    momentDockOrder,
+    drawerProgress,
+    networkEvents,
+    migrationStatus,
+    selectedLegacyFileName,
+    memoryCount,
+    memoryPreview,
+    memorySearch,
+    memorySearchResults,
+    memoryViewStatus,
+    lastMemoryContext,
+  ]);
 
   const pushNetworkEvent = (provider, status, detail = "") => {
     const ts = new Date().toLocaleTimeString([], { hour12: false });
@@ -402,8 +517,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (booted && inputRef.current) inputRef.current.focus();
-  }, [booted, chan, server]);
+    if (inputRef.current) inputRef.current.focus();
+  }, [chan, server]);
   useEffect(() => {
     if (messageLogRef.current) {
       messageLogRef.current.scrollTo({
@@ -412,26 +527,6 @@ export default function App() {
       });
     }
   }, [channelData, chan]);
-
-  useEffect(() => {
-    if (bootFrame === -1 || booted) return;
-    const maxFrames = 4;
-    if (bootFrame >= maxFrames) {
-      setBooted(true);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setBootFrame((p) => p + 1);
-    }, 700);
-    return () => clearTimeout(timer);
-  }, [bootFrame, booted]);
-
-  const getBootArrows = () => {
-    const step = bootFrame === -1 ? 0 : Math.min(bootFrame, 3);
-    const spaces = " ".repeat((3 - step) * 2);
-    const leftPad = " ".repeat(step * 2);
-    return `${leftPad}>>${spaces} INITIALIZE UPLINK ${spaces}<<${leftPad}`;
-  };
 
   useEffect(() => {
     const root = document.documentElement;
@@ -491,7 +586,6 @@ export default function App() {
     const fetchModels = async () => {
       const currentKey = keys[activeProvider];
       setModelList([]);
-      if (!booted) return;
       if (!currentKey) {
         setModelFetchStatusByProvider((prev) => ({
           ...prev,
@@ -585,7 +679,7 @@ export default function App() {
       }
     };
     fetchModels();
-  }, [activeProvider, booted, keys]);
+  }, [activeProvider, keys]);
 
   // --- SEND MESSAGE LOGIC ---
   const handleSend = async (e) => {
@@ -833,6 +927,48 @@ export default function App() {
     }
   };
 
+  const readFileAsDataURL = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () =>
+        reject(reader.error || new Error("FAILED_TO_READ_FILE"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleRememberImage = async () => {
+    const file = imageMemoryInputRef.current?.files?.[0];
+    if (!file) {
+      setImageMemoryStatus("SELECT_AN_IMAGE_FIRST");
+      return;
+    }
+
+    setImageMemoryStatus("REMEMBERING_IMAGE...");
+    try {
+      const src = await readFileAsDataURL(file);
+      await Memory.rememberImage(
+        {
+          src,
+          name: file.name,
+          alt: file.name.replace(/\.[^.]+$/, "") || file.name,
+          mimeType: file.type,
+          size: file.size,
+        },
+        {
+          source: "memory-tools",
+          tags: ["image", "remember", file.type || "image"],
+          caption: file.name.replace(/\.[^.]+$/, "") || file.name,
+        },
+      );
+      setImageMemoryStatus(`REMEMBERED_${file.name}`);
+      playSystemSound("chirp");
+      imageMemoryInputRef.current.value = "";
+      await loadMemoryPreview();
+    } catch (err) {
+      setImageMemoryStatus(`IMAGE_ERR_${err.message}`);
+    }
+  };
+
   const loadMemoryPreview = async () => {
     setMemoryViewStatus("LOADING...");
     try {
@@ -914,7 +1050,7 @@ export default function App() {
     );
   };
   const findMomentDock = (momentId) => {
-    const dockKeys = ["nav", "terminal"];
+    const dockKeys = ["nav", "terminal", "samus-manus"];
     return (
       dockKeys.find((dockKey) =>
         (momentDockOrder[dockKey] || []).includes(momentId),
@@ -1023,6 +1159,48 @@ export default function App() {
       </div>
     </MemoryMomentCard>
   );
+  const voiceMemoryCard = (
+    <MemoryMomentCard
+      title="VOICE_CARD"
+      accent="#9bff9b"
+      onFullscreen={() => setMemoryFullscreenCard("voice")}
+      draggable
+      onDragStart={(e) => handleMomentDragStart(e, "voice")}
+      onDragEnd={() => handleMomentDragEnd("voice")}
+      onDragOver={handleMomentDragOver}
+      onDrop={(e) => handleMomentDrop(e, "voice", "samus-manus")}
+      dragged={draggedMomentId === "voice"}
+      snapped={snappedMomentId === "voice"}
+    >
+      <div>LISTEN: ENABLED</div>
+      <div>CHAN: {chan.toUpperCase()}</div>
+      <div>MODEL: {modelID || "NO_MODEL"}</div>
+      <div style={{ marginTop: "6px", color: "#78b8ff" }}>
+        {input.trim() ? "AUDIO BUFFER LIVE" : "WAITING FOR INPUT"}
+      </div>
+    </MemoryMomentCard>
+  );
+  const speakMemoryCard = (
+    <MemoryMomentCard
+      title="SPEAK_CARD"
+      accent="#78b8ff"
+      onFullscreen={() => setMemoryFullscreenCard("speak")}
+      draggable
+      onDragStart={(e) => handleMomentDragStart(e, "speak")}
+      onDragEnd={() => handleMomentDragEnd("speak")}
+      onDragOver={handleMomentDragOver}
+      onDrop={(e) => handleMomentDrop(e, "speak", "samus-manus")}
+      dragged={draggedMomentId === "speak"}
+      snapped={snappedMomentId === "speak"}
+    >
+      <div>OUTPUT: READY</div>
+      <div>PROVIDER: {activeProvider.toUpperCase()}</div>
+      <div>VOICE: {secondColumnSelectionLabel}</div>
+      <div style={{ marginTop: "6px", color: "#9bff9b" }}>
+        {modelID || "NO_MODEL"}
+      </div>
+    </MemoryMomentCard>
+  );
   const getDockMomentCards = (dockKey) => {
     if (dockKey === "terminal") {
       return {
@@ -1030,6 +1208,12 @@ export default function App() {
         summary: summaryMemoryCard,
         tools: toolsMemoryCard,
         viewer: viewerMemoryCard,
+      };
+    }
+    if (dockKey === "samus-manus") {
+      return {
+        voice: voiceMemoryCard,
+        speak: speakMemoryCard,
       };
     }
     return {
@@ -1107,6 +1291,13 @@ export default function App() {
           }}
           style={{ display: "none" }}
         />
+        <input
+          ref={imageMemoryInputRef}
+          type="file"
+          accept="image/*"
+          onChange={() => void handleRememberImage()}
+          style={{ display: "none" }}
+        />
         <div
           style={{
             display: "flex",
@@ -1148,6 +1339,22 @@ export default function App() {
         </div>
         <button
           type="button"
+          onClick={() => imageMemoryInputRef.current?.click()}
+          style={{
+            width: "100%",
+            padding: "6px 8px",
+            background: "#111",
+            color: "#9bff9b",
+            border: "1px solid #333",
+            cursor: "pointer",
+            fontFamily: "monospace",
+            fontSize: "9px",
+          }}
+        >
+          REMEMBER IMAGE
+        </button>
+        <button
+          type="button"
           onClick={handleLegacyImport}
           style={{
             width: "100%",
@@ -1187,6 +1394,9 @@ export default function App() {
           }}
         >
           {migrationStatus || "LOAD memory_for_dexie.json"}
+        </div>
+        <div style={{ fontSize: "9px", color: "#666", wordBreak: "break-word" }}>
+          {imageMemoryStatus || "IMAGE_MEMORY_IDLE"}
         </div>
       </div>
     </MemoryMomentCard>
@@ -1289,6 +1499,11 @@ export default function App() {
                 <div style={{ color: "#888" }}>
                   {(item.tags || []).slice(0, 4).join(", ") || "-"}
                 </div>
+                {item?.metadata?.image ? (
+                  <div style={{ color: "#9bff9b" }}>
+                    IMAGE: {item.metadata.image.name || item.metadata.image.caption || "embedded"}
+                  </div>
+                ) : null}
               </div>
             ))
           )
@@ -1310,16 +1525,36 @@ export default function App() {
               <div style={{ color: "#888" }}>
                 {(item.tags || []).slice(0, 4).join(", ") || "-"}
               </div>
+              {item?.metadata?.image ? (
+                <div style={{ color: "#9bff9b" }}>
+                  IMAGE: {item.metadata.image.name || item.metadata.image.caption || "embedded"}
+                </div>
+              ) : null}
             </div>
           ))
         )}
       </div>
     </MemoryMomentCard>
   );
-  const momentRailItems = getDockMomentOrder("terminal").map((id) => ({
-    id,
-    aspectRatio: id === "tools" ? 1.35 : id === "viewer" ? 1.25 : 1,
-  }));
+  const activeMomentDockKey =
+    server === "m" && chan === "intel"
+      ? "terminal"
+      : server === "b" && chan === "samus-manus"
+        ? "samus-manus"
+        : null;
+  const activeMomentRailItems = activeMomentDockKey
+    ? getDockMomentOrder(activeMomentDockKey).map((id) => ({
+        id,
+        aspectRatio:
+          id === "tools"
+            ? 1.35
+            : id === "viewer"
+              ? 1.25
+              : id === "speak"
+                ? 1.08
+                : 1,
+      }))
+    : [];
   const fullscreenCardStyle = {
     minHeight: "100%",
     height: "100%",
@@ -1331,6 +1566,8 @@ export default function App() {
       summary: summaryMemoryCard,
       tools: toolsMemoryCard,
       viewer: viewerMemoryCard,
+      voice: voiceMemoryCard,
+      speak: speakMemoryCard,
     };
     const selected = fullscreenCards[memoryFullscreenCard];
     if (!selected) return null;
@@ -1350,53 +1587,49 @@ export default function App() {
     });
   };
   const memoryPanels = (
-    <JustifiedMasonry
-      items={momentRailItems}
-      targetRowHeight={isDrawerMode ? 104 : 128}
-      itemSpacing={8}
-      rowSpacing={8}
-      getId={(item) => item.id}
-      getAspectRatio={(item) => item.aspectRatio}
-      renderItem={(item) => renderDockMomentTile(item.id, "terminal")}
-    />
+    activeMomentDockKey === "terminal" ? (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: "12px",
+        }}
+      >
+        {[0, 1].map((bucket) => {
+          const bucketItems = activeMomentRailItems.filter(
+            (_, index) => index % 2 === bucket,
+          );
+
+          return bucketItems.length ? (
+            <JustifiedMasonry
+              key={`intel-bucket-${bucket}`}
+              items={bucketItems}
+              targetRowHeight={isDrawerMode ? 104 : 128}
+              itemSpacing={8}
+              rowSpacing={8}
+              getId={(item) => item.id}
+              getAspectRatio={(item) => item.aspectRatio}
+              renderItem={(item) =>
+                renderDockMomentTile(item.id, activeMomentDockKey)
+              }
+            />
+          ) : (
+            <div key={`intel-bucket-${bucket}`} />
+          );
+        })}
+      </div>
+    ) : null
   );
-  const fullscreenOverlayVisible =
-    !!memoryFullscreenCard &&
-    ((server === "m" && chan === "intel") ||
-      (server === "b" && chan === "samus-manus"));
+  const speakCards =
+    server === "b" ? (
+      <VoiceFlowPanel compact defaultProfileId="jenna-jacket" defaultPresetName="mechanicus" />
+    ) : null;
+  const fullscreenOverlayVisible = !!memoryFullscreenCard && Boolean(activeMomentDockKey);
   const fullscreenOverlayTitle =
     memoryFullscreenCard === "live"
       ? "LIVE_HANGOUT"
       : `MEMORY_${String(memoryFullscreenCard || "").toUpperCase()}`;
   const fullscreenCardContent = renderFullscreenMemoryCard();
-  if (!booted) {
-    return (
-      <>
-        <div
-          className="boot-screen"
-          onClick={() => {
-            setupAudio();
-            setBooted(true);
-          }}
-          style={{
-            height: "var(--app-height, 100vh)",
-            backgroundColor: "#000",
-            color: "#00ff00",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            fontFamily: "monospace",
-          }}
-        >
-          <pre
-            style={{ textAlign: "center" }}
-          >{`[ WAYLAND-YUTANI CYBERDEC ]\n[ MU/TH/UR 6000 ]\n\n${getBootArrows()}`}</pre>
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <div
@@ -1814,7 +2047,8 @@ export default function App() {
               setDrawerProgress(0);
             }
           }}
-          memoryPanels={server === "m" && chan === "intel" ? memoryPanels : null}
+          memoryPanels={memoryPanels}
+          topPanel={speakCards}
           messages={channelData[chan] || []}
           messageLogRef={messageLogRef}
           chatEndRef={chatEndRef}

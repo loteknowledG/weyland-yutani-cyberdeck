@@ -4,7 +4,8 @@ export default function TerminalColumn({
   headerTint,
   headerGlow,
   onMainClick,
-  memoryPanels,
+  topPanel = null,
+  memoryPanels = null,
   messages = [],
   messageLogRef,
   chatEndRef,
@@ -81,8 +82,14 @@ export default function TerminalColumn({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col pt-6">
-        {memoryPanels}
+      <div className="flex-1 overflow-y-auto px-4 pb-4 pt-2 custom-scrollbar flex flex-col">
+        {topPanel ? (
+          <div style={{ marginBottom: "16px" }}>{topPanel}</div>
+        ) : null}
+
+        {memoryPanels ? (
+          <div style={{ marginBottom: "16px" }}>{memoryPanels}</div>
+        ) : null}
 
         <div
           ref={messageLogRef}

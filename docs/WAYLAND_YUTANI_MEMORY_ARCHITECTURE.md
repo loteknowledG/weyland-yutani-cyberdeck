@@ -6,6 +6,7 @@ This is the memory and retrieval shape Wayland-Yutani Cyberdec should follow.
 
 - Use layered memory, not one giant blob.
 - Keep a lightweight index that points to the right data.
+- Let remembered records carry text, images, and embeddings together when needed.
 - Only write memory after successful actions.
 - Separate memory by purpose and retention.
 - Preserve raw records when something matters.
@@ -25,6 +26,7 @@ This is the memory and retrieval shape Wayland-Yutani Cyberdec should follow.
 ## Memory Actions
 
 - `remember` means pin now.
+- `remember` can store an image alongside its caption, tags, and embedding.
 - `classify` means assign meaning and type.
 - `promote` means copy into durable memory.
 - `forget` means unload or prune the active layer.
@@ -45,6 +47,8 @@ This is the memory and retrieval shape Wayland-Yutani Cyberdec should follow.
 ## UI Shape
 
 - Show memory hits in the interface.
+- Let hangout mode keep the live running conversation log so important turns can be promoted into `remember`.
+- Show image memories and their captions when they are part of retrieval.
 - Show the injected prompt block.
 - Show the retrospective preview.
 - Let widgets/cards move between grids and docks.
