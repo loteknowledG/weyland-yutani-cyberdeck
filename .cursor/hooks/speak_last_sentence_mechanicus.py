@@ -6,6 +6,7 @@ Cursor: .cursor/hooks.json should call `python -u .cursor/hooks/speak_last_sente
 (direct Python stdin; the .cmd launcher is only for manual runs — cmd `&&` chains can eat stdin).
 Logs (gitignored): mechanicus-hook.log (flow + snippet + pid); mechanicus-tts-stderr.log (Samus/pygame).
 Voice profile for speak: `.cursor/hooks/cursor-tts-voice.txt` (one line: slug id, e.g. mechanicus-voice); Cyberdeck dev bridge writes this file.
+Optional gain: `.cursor/hooks/cursor-tts-volume.txt` (integer 0–100, 100 = profile default; Cyberdeck Cursor card knob).
 If the hook log looks stale in the editor, reopen the file or run tail — Cursor often does not auto-refresh ignored logs.
 Smoke (real TTS): pnpm run hook:smoke-mechanicus-voice
 Debug stdin: set CURSOR_HOOK_MECHANICUS_DEBUG=1 for Cursor, then retry once.
@@ -35,7 +36,37 @@ _LOG_PATH = _HOOK_DIR / "mechanicus-hook.log"
 _TTS_STDERR_PATH = _HOOK_DIR / "mechanicus-tts-stderr.log"
 _CYBERDECK_MUTE_PATH = _HOOK_DIR / "mechanicus-cursor.muted"
 _CURSOR_VOICE_PATH = _HOOK_DIR / "cursor-tts-voice.txt"
+_CURSOR_VOLUME_PATH = _HOOK_DIR / "cursor-tts-volume.txt"
 _CURSOR_VOICE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+
+# Cursor dial → Samus trim. Keep in sync with `src/lib/cursorTtsVolume.ts`.
+_VOL_UI_MIN = 0
+_VOL_UI_MAX = 100
+_VOL_UI_DEFAULT = 100
+_VOL_NO_OVERRIDE_MIN = 99  # UI at or above: no --volume
+_VOL_TRIM_PCT_MIN = -40
+_VOL_TRIM_PCT_MAX = 0
+_VOL_UI_TO_TRIM_SCALE = 0.5
+
+
+def _read_cursor_tts_volume_override() -> str | None:
+    """Map `.cursor/hooks/cursor-tts-volume.txt` (0–100) to Samus `BOOTUP_TTS_VOLUME` trim; stay in safe % range."""
+    try:
+        if not _CURSOR_VOLUME_PATH.is_file():
+            return None
+        raw = _CURSOR_VOLUME_PATH.read_text(encoding="utf-8").strip()
+        n = int(raw)
+    except (OSError, ValueError):
+        return None
+    n = max(_VOL_UI_MIN, min(_VOL_UI_MAX, n))
+    if n >= _VOL_NO_OVERRIDE_MIN:
+        return None
+    raw_delta = (n - _VOL_UI_DEFAULT) * _VOL_UI_TO_TRIM_SCALE
+    delta = int(round(max(_VOL_TRIM_PCT_MIN, min(_VOL_TRIM_PCT_MAX, raw_delta))))
+    if delta >= 0:
+        return None
+    return f"{delta:+d}%"
 
 
 def _read_cursor_hook_voice_profile() -> str:
@@ -284,7 +315,11 @@ def main() -> int:
         tts_log.write(f"\n--- TTS stderr {time.strftime('%Y-%m-%dT%H:%M:%S')} ---\n")
         tts_log.flush()
         popen_kw["stderr"] = tts_log
-        cmd = [sys.executable, vp, "speak", voice_profile, snippet]
+        vol = _read_cursor_tts_volume_override()
+        cmd = [sys.executable, vp, "speak", voice_profile]
+        if vol:
+            cmd += ["--volume", vol]
+        cmd.append(snippet)
         try:
             proc = subprocess.Popen(
                 cmd,

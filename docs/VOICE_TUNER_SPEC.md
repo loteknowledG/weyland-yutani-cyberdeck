@@ -218,6 +218,10 @@ This state can be:
 - saved to disk
 - used to restore the UI
 - sent to a voice backend
+
+The compact voice card volume control may use the shared Realmorphism-style knob primitive so the UI feels like a real tuning surface instead of a slider.
+
+The Cursor stage may also surface the Realmorph shim as a compact dial so it fits the control strip without expanding the card height.
 - used as a seed for AI behavior
 
 ## AI Behavior Link

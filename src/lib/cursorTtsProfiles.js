@@ -1,6 +1,6 @@
 /** Example / default Cursor-hook profile ids (Cyberdeck UI lists all `getAllVoiceProfiles()`). */
 export const CURSOR_TTS_PROFILES = [
-  { id: "mechanicus-voice", label: "Mechanicus" },
+  { id: "mechanicus-voice", label: "Tech Priest" },
   { id: "jenna-jacket", label: "Jeena Jacket" },
   { id: "warp-spider", label: "Warp Spider" },
 ];

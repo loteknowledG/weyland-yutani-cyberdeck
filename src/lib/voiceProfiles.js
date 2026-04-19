@@ -17,7 +17,7 @@ export const voiceProfiles = [
   },
   {
     id: "mechanicus-voice",
-    label: "Mechanicus Voice",
+    label: "Tech Priest",
     description: "Dark, ritualistic machine-liturgy voice for sci-fi narration.",
     browserVoice: "en-US-AndrewNeural",
     nativeVoice: "Microsoft David Desktop - English (United States)",
@@ -34,7 +34,8 @@ export const voiceProfiles = [
   {
     id: "warp-spider",
     label: "Warp Spider",
-    description: "Small-engine / lawnmower talk: low roar, idle pulse + fast buzz, short metal ring, grain; slips (up to 4× / 4 words, rarer at max).",
+    description:
+      "Small-engine / lawnmower talk: low roar, idle pulse + fast buzz, short metal ring, grain; slips (up to 4× / 4 words, rarer at max).",
     browserVoice: "en-US-GuyNeural",
     nativeVoice: "Microsoft Zira Desktop - English (United States)",
     forceNativeTTS: false,
@@ -287,6 +288,20 @@ function slugifyVoiceProfileId(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * True for UI “duplicate preset” noise (Cursor/VS style names, trailing “ copy”, id suffix -copy).
+ * Keeps those entries out of the Cursor hook voice wheel without deleting localStorage presets.
+ */
+export function isDuplicateStyleVoiceName(value) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (/(?:\s+copy)+$/i.test(s)) return true;
+  if (/(?:-copy)+$/i.test(s)) return true;
+  if (/\bcopy\s+of\b/i.test(s)) return true;
+  if (/\bimmutable\s+copy\b/i.test(s)) return true;
+  return false;
 }
 
 export function getAllVoiceProfiles() {

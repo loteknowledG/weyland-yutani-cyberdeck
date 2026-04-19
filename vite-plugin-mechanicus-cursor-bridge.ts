@@ -4,6 +4,10 @@ import path from "node:path";
 import type { Plugin } from "vite";
 
 import { isValidCursorTtsProfileId } from "./src/lib/cursorTtsProfileId.js";
+import {
+  clampCursorTtsVolumeUi,
+  CURSOR_TTS_VOLUME_UI_DEFAULT,
+} from "./src/lib/cursorTtsVolume.ts";
 
 const DEFAULT_PROFILE = "mechanicus-voice";
 
@@ -12,6 +16,7 @@ export function mechanicusCursorBridge(rootDir: string): Plugin {
   const hooksDir = path.join(rootDir, ".cursor/hooks");
   const mutedFile = path.join(hooksDir, "mechanicus-cursor.muted");
   const voiceFile = path.join(hooksDir, "cursor-tts-voice.txt");
+  const volumeFile = path.join(hooksDir, "cursor-tts-volume.txt");
   const route = "/__cyberdeck/mechanicus-cursor";
 
   function isMuted(): boolean {
@@ -52,6 +57,23 @@ export function mechanicusCursorBridge(rootDir: string): Plugin {
     fs.writeFileSync(voiceFile, `${next}\n`, "utf8");
   }
 
+  function readVolume(): number {
+    try {
+      if (!fs.existsSync(volumeFile)) return CURSOR_TTS_VOLUME_UI_DEFAULT;
+      const raw = fs.readFileSync(volumeFile, "utf8").trim();
+      const n = Number.parseInt(raw, 10);
+      return clampCursorTtsVolumeUi(n);
+    } catch {
+      return CURSOR_TTS_VOLUME_UI_DEFAULT;
+    }
+  }
+
+  function setVolume(n: number): void {
+    const next = clampCursorTtsVolumeUi(n);
+    fs.mkdirSync(path.dirname(volumeFile), { recursive: true });
+    fs.writeFileSync(volumeFile, `${next}\n`, "utf8");
+  }
+
   function attach(server: { middlewares: Connect.Server }): void {
     server.middlewares.use((req, res, next) => {
       const url = (req.url ?? "").split("?")[0];
@@ -70,6 +92,7 @@ export function mechanicusCursorBridge(rootDir: string): Plugin {
           JSON.stringify({
             muted: isMuted(),
             profile: readProfile(),
+            volume: readVolume(),
             bridge: true,
           }),
         );
@@ -82,14 +105,16 @@ export function mechanicusCursorBridge(rootDir: string): Plugin {
         });
         req.on("end", () => {
           try {
-            const j = JSON.parse(body || "{}") as { muted?: boolean; profile?: string };
+            const j = JSON.parse(body || "{}") as { muted?: boolean; profile?: string; volume?: number };
             if (typeof j.muted === "boolean") setMuted(j.muted);
             if (typeof j.profile === "string") setProfile(j.profile);
+            if (typeof j.volume === "number" && Number.isFinite(j.volume)) setVolume(j.volume);
             res.end(
               JSON.stringify({
                 ok: true,
                 muted: isMuted(),
                 profile: readProfile(),
+                volume: readVolume(),
               }),
             );
           } catch (e) {

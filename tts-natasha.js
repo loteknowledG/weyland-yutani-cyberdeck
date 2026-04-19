@@ -1,11 +1,14 @@
 // Simple Node.js script to call coderobo TTS API for Natasha (English Australia, female)
 const https = require('https');
 
-const text = process.argv.slice(2).join(' ') || 'Hello from Natasha!';
+
+const args = process.argv.slice(2);
+const text = args[0] || 'Hello from Natasha!';
+const voice = args[1] || 'en-AU-NatashaNeural';
 
 const data = JSON.stringify({
   text,
-  voice: 'en-AU-NatashaNeural',
+  voice,
   rate: 0,
   pitch: 0
 });

@@ -1,33 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import AsciiStartStopButton from "./AsciiStartStopButton";
+import { Knob } from "./ui/knob";
 import { canUseRemoteTts, requestRemoteTtsAudioUrl } from "../lib/tts";
 import { resolveVoiceProfile } from "../lib/voiceProfiles";
 
 const DEFAULT_SAMPLE = "Hello, this is your cyberdeck speaking. Adjust the voice wheel and listen.";
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <path d="M8 5v14l11-7z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor" />
-      <rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor" />
-    </svg>
-  );
-}
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -200,6 +177,14 @@ export default function VoiceCard({
     };
   }, []);
 
+  /** Remote TTS uses HTMLAudioElement — volume can change while playing. Browser SpeechSynthesis applies on next speak only. */
+  useEffect(() => {
+    const a = audioRef.current;
+    if (a) {
+      a.volume = clamp01(volume / 100);
+    }
+  }, [volume]);
+
   const stop = () => {
     speakTokenRef.current += 1;
     const audio = audioRef.current;
@@ -253,20 +238,6 @@ export default function VoiceCard({
       setSpeaking(true);
       setStatus("speaking");
     }
-  };
-
-  const toggleSpeak = () => {
-    if (speaking && !paused) {
-      pause();
-      return;
-    }
-
-    if (paused) {
-      resume();
-      return;
-    }
-
-    void speak();
   };
 
   const playBrowserFallback = async () => {
@@ -471,50 +442,46 @@ export default function VoiceCard({
       </div>
 
       {compact ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 6, color: "#7a7a7a", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Volume
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              aria-label="Volume"
-              style={{
-                width: "100%",
-                accentColor: accent,
-                cursor: "pointer",
-              }}
-            />
-          </label>
-          <button
-            onClick={toggleSpeak}
-            disabled={!text.trim() || status === "loading"}
-            aria-label={speaking && !paused ? "Pause" : paused ? "Resume" : "Speak"}
-            style={{
-              width: "100%",
-              border: `1px solid ${speaking || paused ? "#ff4d4d55" : `${accent}55`}`,
-              background: "rgba(0,0,0,0.85)",
-              color: speaking && !paused ? "#ff9b9b" : accent,
-              cursor: "pointer",
-              fontSize: 12,
-              lineHeight: 1,
-              padding: "10px 12px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              borderRadius: 10,
-              fontFamily: "monospace",
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+          <div
+            style={{ touchAction: "none" }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
-            {speaking && !paused ? <PauseIcon /> : <PlayIcon />}
-            <span>{speaking && !paused ? "Pause" : paused ? "Resume" : "Play"}</span>
-          </button>
+            <Knob
+              label="Volume"
+              unit="%"
+              min={0}
+              max={100}
+              step={1}
+              value={volume}
+              onValueChange={setVolume}
+              wheelMultiplier={3.6}
+              dragMultiplier={4.4}
+              size="sm"
+              theme="dark"
+              showReadout
+              showLabel
+              className="shrink-0 w-16"
+            />
+          </div>
+          <AsciiStartStopButton
+            running={speaking || paused}
+            disabled={!text.trim() || status === "loading"}
+            onRunningChange={(nextRunning) => {
+              if (nextRunning) {
+                void speak();
+                return;
+              }
+              stop();
+            }}
+            ariaLabelOn="Codex voice on, press to stop"
+            ariaLabelOff="Codex voice off, press to start"
+            style={{
+              alignSelf: "center",
+              marginTop: 10,
+            }}
+          />
         </div>
       ) : null}
     </div>

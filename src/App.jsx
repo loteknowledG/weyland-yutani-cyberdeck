@@ -234,7 +234,7 @@ export default function App() {
         ? chan === "providers"
           ? "GATEWAY"
           : chan.toUpperCase()
-        : "VOICE";
+        : "Voices";
   const providerTint = !providerReady
     ? inactiveTextColor
     : currentModelHealth === "green"
@@ -1622,7 +1622,7 @@ export default function App() {
   );
   const speakCards =
     server === "b" ? (
-      <VoiceFlowPanel compact defaultProfileId="jenna-jacket" defaultPresetName="mechanicus" />
+      <VoiceFlowPanel compact />
     ) : null;
   const fullscreenOverlayVisible = !!memoryFullscreenCard && Boolean(activeMomentDockKey);
   const fullscreenOverlayTitle =
@@ -2025,7 +2025,7 @@ export default function App() {
                     paddingBottom: "8px",
                   }}
                 >
-                  {chan === "samus-manus" ? "> " : "# "}VOICE
+                  {chan === "samus-manus" ? "> " : "# "}Voices
                 </div>
               </>
             )}

@@ -23,3 +23,5 @@ The harness and memory contract live in the sibling repo:
 - runtime routing is delegated to Cognosys
 - keeping the harness contract separate from the app shell
 - voice playback uses remote TTS when reachable, then falls back to browser speech synthesis
+- voice rail includes Cursor, VS Code, and Codex cards
+- Cursor now shows a Realmorph Shim knob to the left of the start/stop control

@@ -13,10 +13,12 @@
     "deploy": "gh-pages -d dist",
     "tts-natasha": "node tts-natasha.js",
     "tts-natasha-play": "node tts-natasha-play.js",
+    "voice:vscode": "node scripts/vscode-voice.js",
     "hook:test-mechanicus-last": "python .cursor/hooks/speak_last_sentence_mechanicus.py --self-test",
     "hook:dry-mechanicus-last": "python .cursor/hooks/speak_last_sentence_mechanicus.py --dry-run",
     "hook:smoke-mechanicus-voice": "powershell -NoProfile -Command \"Get-Content -Raw .cursor/hooks/sample-after-agent.json | python .cursor/hooks/speak_last_sentence_mechanicus.py\"",
-    "mechanicus:say": "python scripts/mechanicus_say.py"
+    "mechanicus:say": "python scripts/mechanicus_say.py",
+    "debug:voice-ui": "node scripts/playwright-debug-voice.mjs"
   },
   "keywords": [],
   "author": "",
@@ -48,6 +50,7 @@
     "autoprefixer": "^10.5.0",
     "electron": "^41.1.1",
     "gh-pages": "^6.3.0",
+    "playwright": "1.50.1",
     "postcss": "^8.5.10",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",

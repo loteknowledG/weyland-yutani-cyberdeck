@@ -1,16 +1,72 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth } from "react-grid-layout";
 import { noCompactor } from "react-grid-layout/core";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import VoiceAdaptiveWheel from "./VoiceAdaptiveWheel";
-import { getAllVoiceProfiles, resolveVoiceProfile, saveVoiceProfilePreset } from "../lib/voiceProfiles";
+import VoiceCard from "./VoiceCard";
+import VSCodeVoiceCard from "./VSCodeVoiceCard";
+import { Knob } from "./ui/knob";
+import {
+  clampCursorTtsVolumeUi,
+  CURSOR_TTS_VOLUME_UI_DEFAULT,
+  CURSOR_TTS_VOLUME_UI_MAX,
+  CURSOR_TTS_VOLUME_UI_MIN,
+} from "../lib/cursorTtsVolume";
+import { getAllVoiceProfiles, isDuplicateStyleVoiceName, resolveVoiceProfile } from "../lib/voiceProfiles";
 import { DEFAULT_CURSOR_TTS_PROFILE_ID } from "../lib/cursorTtsProfiles";
 
-const DEFAULT_PRESET_NAME = "mechanicus";
+const VOICE_GRID_COLS = 12;
+const VOICE_GRID_MARGIN_X = 12;
+const VOICE_GRID_MARGIN_Y = 12;
+const VOICE_GRID_ROW_HEIGHT = 24;
 
-function PipelineShell({ title, accent, subtitle, children, gridW, gridH, style = {} }) {
+const BLANK_GRID_MIN_W = 2;
+const BLANK_GRID_MIN_H = 4;
+
+function colWidthForLayout(containerWidthPx, cols, marginX) {
+  if (!Number.isFinite(containerWidthPx) || containerWidthPx <= 0) return 0;
+  const usable = containerWidthPx - marginX * (cols + 1);
+  if (usable <= 0) return 0;
+  return usable / cols;
+}
+
+function pixelWidthForW(containerWidthPx, w) {
+  const cw = colWidthForLayout(containerWidthPx, VOICE_GRID_COLS, VOICE_GRID_MARGIN_X);
+  if (cw <= 0 || !Number.isFinite(w) || w <= 0) return 0;
+  return Math.round(w * cw + VOICE_GRID_MARGIN_X * Math.max(0, w - 1));
+}
+
+function hForSquarePixelSide(sidePx) {
+  if (!Number.isFinite(sidePx) || sidePx <= 0) return BLANK_GRID_MIN_H;
+  return Math.max(BLANK_GRID_MIN_H, Math.round((sidePx + VOICE_GRID_MARGIN_Y) / (VOICE_GRID_ROW_HEIGHT + VOICE_GRID_MARGIN_Y)));
+}
+
+/** Keep Cursor card square while clamping within valid grid bounds. */
+function clampVoiceGridLayout(layout, containerWidthPx) {
+  return layout.map((item) => {
+    if (item.i !== "cursor") return item;
+    const w = Math.max(BLANK_GRID_MIN_W, Math.min(VOICE_GRID_COLS, Math.round(item.w)));
+    const measuredSide = pixelWidthForW(containerWidthPx, w);
+    const h = measuredSide ? hForSquarePixelSide(measuredSide) : Math.max(BLANK_GRID_MIN_H, Math.round(item.h));
+    if (w === item.w && h === item.h) return item;
+    return { ...item, w, h };
+  });
+}
+
+function PipelineShell({
+  title,
+  accent,
+  subtitle,
+  children,
+  gridW,
+  gridH,
+  showTitleRow = true,
+  /** No outer frame — children provide the visible card; use for inline drag on inner chrome. */
+  bare = false,
+  style = {},
+}) {
   const rootRef = useRef(null);
   const [pxSize, setPxSize] = useState({ w: 0, h: 0 });
 
@@ -34,38 +90,70 @@ function PipelineShell({ title, accent, subtitle, children, gridW, gridH, style 
         ? `${title} · ${gridW} cols × ${gridH} rows`
         : title;
 
+  const showFloatingStrip = !bare && !showTitleRow;
+
   return (
     <div
       ref={rootRef}
       style={{
+        position: "relative",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
-        borderRadius: 18,
-        border: `1px solid ${accent}33`,
-        background: "linear-gradient(180deg, rgba(8,8,8,0.98), rgba(4,4,4,0.98))",
-        boxShadow: `0 0 0 1px ${accent}12 inset`,
-        padding: 12,
-        overflow: "auto",
+        boxSizing: "border-box",
+        minHeight: 0,
+        width: "100%",
+        gap: showTitleRow ? 10 : 0,
+        ...(bare
+          ? {
+              overflow: showTitleRow ? "visible" : "hidden",
+            }
+          : {
+              borderRadius: 18,
+              border: `1px solid ${accent}33`,
+              background: "linear-gradient(180deg, rgba(8,8,8,0.98), rgba(4,4,4,0.98))",
+              boxShadow: `0 0 0 1px ${accent}12 inset`,
+              padding: 12,
+              overflow: "auto",
+            }),
         ...style,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+      {showTitleRow ? (
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+          <div
+            className="voice-card-handle"
+            style={{
+              cursor: "move",
+              color: accent,
+              fontSize: 10,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              userSelect: "none",
+            }}
+          >
+            {titleLine}
+          </div>
+          {subtitle ? <div style={{ color: "#7a7a7a", fontSize: 10 }}>{subtitle}</div> : null}
+        </div>
+      ) : showFloatingStrip ? (
         <div
           className="voice-card-handle"
+          aria-label={title}
+          title={title}
           style={{
+            position: "absolute",
+            top: 8,
+            left: 10,
+            right: 10,
+            height: 12,
+            zIndex: 2,
             cursor: "move",
-            color: accent,
-            fontSize: 10,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            userSelect: "none",
+            borderRadius: 6,
+            background: `linear-gradient(90deg, transparent, ${accent}22, transparent)`,
+            opacity: 0.55,
           }}
-        >
-          {titleLine}
-        </div>
-        <div style={{ color: "#7a7a7a", fontSize: 10 }}>{subtitle}</div>
-      </div>
+        />
+      ) : null}
       {children}
     </div>
   );
@@ -73,18 +161,105 @@ function PipelineShell({ title, accent, subtitle, children, gridW, gridH, style 
 
 const MECHANICUS_CURSOR_BRIDGE = "/__cyberdeck/mechanicus-cursor";
 
+/** ASCII START/STOP control — ported from asciimorphism `src/button/button.html`. */
+function AsciiStartStopButton({ running, disabled, onRunningChange, style }) {
+  const [pressed, setPressed] = useState(false);
+
+  const label = (() => {
+    if (pressed) {
+      return running
+        ? `\n   ┌──────┐\n   │ STOP │\n   └──────┘`
+        : `\n   ┌───────┐\n   │ START │\n   └───────┘`;
+    }
+    // Keep the source asciimorphism art exactly as authored.
+    return running
+      ? `  ┌──────┐\n  │ STOP │▒\n  └──────┘▒\n   ▒▒▒▒▒▒▒`
+      : `  ┌───────┐\n  │ START │▒\n  └───────┘▒\n   ▒▒▒▒▒▒▒▒`;
+  })();
+
+  const releaseToggle = () => {
+    if (!pressed) return;
+    setPressed(false);
+    if (disabled) return;
+    onRunningChange(!running);
+  };
+
+  const cancelPress = () => setPressed(false);
+
+  useEffect(() => {
+    if (disabled) setPressed(false);
+  }, [disabled]);
+
+  return (
+    <pre
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={running}
+      aria-disabled={disabled}
+      aria-label={running ? "Cursor after-reply TTS on — press to stop" : "Cursor after-reply TTS off — press to start"}
+      onMouseDown={(e) => {
+        if (disabled || e.button !== 0) return;
+        e.preventDefault();
+        setPressed(true);
+      }}
+      onMouseUp={releaseToggle}
+      onMouseLeave={cancelPress}
+      onTouchStart={(e) => {
+        if (disabled) return;
+        e.preventDefault();
+        setPressed(true);
+      }}
+      onTouchEnd={releaseToggle}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onRunningChange(!running);
+        }
+      }}
+      style={{
+        fontFamily:
+          '"Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "Courier New", ui-monospace, monospace',
+        fontSize: 10,
+        lineHeight: 1,
+        letterSpacing: 0,
+        margin: 0,
+        whiteSpace: "pre",
+        cursor: disabled ? "default" : "pointer",
+        userSelect: "none",
+        transition: "color 0.12s ease, transform 0.08s ease, text-shadow 0.12s ease, opacity 0.12s ease",
+        color: disabled ? (running ? "#8a1f1f" : "#13690a") : running ? "#ff3a3a" : "#39ff14",
+        textShadow: disabled
+          ? "none"
+          : running
+            ? "0 0 8px rgba(255, 58, 58, 0.22)"
+            : "0 0 8px rgba(57, 255, 20, 0.22)",
+        opacity: disabled ? 0.5 : 1,
+        ...style,
+      }}
+    >
+      {label}
+    </pre>
+  );
+}
+
 function MechanicusCursorStage({ gridW, gridH }) {
   const accent = "#c9a227";
+  const cursorWheelRowHeight = Math.max(20, Math.min(38, Math.round((24 * (gridH || 6)) / 6)));
   const [muted, setMuted] = useState(false);
+  const [hookVolume, setHookVolume] = useState(CURSOR_TTS_VOLUME_UI_DEFAULT);
   const [profile, setProfile] = useState(DEFAULT_CURSOR_TTS_PROFILE_ID);
   const [bridge, setBridge] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [voiceListNonce, setVoiceListNonce] = useState(0);
+  const normalizeProfileId = (value) => String(value || "").replace(/(?:-copy)+$/i, "");
+  const effectiveProfile = normalizeProfileId(profile);
 
   const cursorWheelOptions = useMemo(() => {
     const seen = new Map();
     for (const p of getAllVoiceProfiles()) {
+      if (isDuplicateStyleVoiceName(p?.id) || isDuplicateStyleVoiceName(p?.label)) continue;
       if (p?.id && !seen.has(p.id)) {
         seen.set(p.id, {
           id: p.id,
@@ -96,452 +271,494 @@ function MechanicusCursorStage({ gridW, gridH }) {
     const arr = [...seen.values()].sort((a, b) =>
       a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
     );
-    if (profile && !seen.has(profile)) {
-      arr.push({ id: profile, label: profile, description: "(from hook file)" });
+    if (effectiveProfile && !seen.has(effectiveProfile)) {
+      arr.push({ id: effectiveProfile, label: effectiveProfile, description: "(from hook file)" });
     }
     return arr.map((o) => ({
       label: o.label,
       value: o.id,
       textValue: `${o.label} ${o.description} ${o.id}`,
     }));
-  }, [profile, voiceListNonce]);
+  }, [effectiveProfile, voiceListNonce]);
 
   const hookOn = !muted;
 
-  const refresh = async () => {
+  const cursorVoiceResolved = useMemo(() => {
+    try {
+      return resolveVoiceProfile(effectiveProfile);
+    } catch {
+      return null;
+    }
+  }, [effectiveProfile]);
+
+  const refresh = useCallback(async () => {
     try {
       const r = await fetch(MECHANICUS_CURSOR_BRIDGE, { method: "GET" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setMuted(!!j.muted);
-      if (typeof j.profile === "string" && j.profile) setProfile(j.profile);
+      if (typeof j.profile === "string" && j.profile) setProfile(normalizeProfileId(j.profile));
+      if (typeof j.volume === "number" && Number.isFinite(j.volume)) {
+        setHookVolume(clampCursorTtsVolumeUi(j.volume));
+      }
       setBridge(!!j.bridge);
       setErr(null);
       setVoiceListNonce((n) => n + 1);
+      return j;
     } catch {
       setBridge(false);
       setErr(null);
+      return null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
-  const postState = async (patch) => {
-    setBusy(true);
+  /** GET then POST same state — light bump for wheel / profile-only writes. */
+  const resyncHookFiles = useCallback(
+    async (profileId) => {
+      try {
+        const j = await refresh();
+        if (!j?.bridge) return;
+        const pid = normalizeProfileId(profileId);
+        const r2 = await fetch(MECHANICUS_CURSOR_BRIDGE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            muted: !!j.muted,
+            profile: pid,
+            volume:
+              typeof j.volume === "number" && Number.isFinite(j.volume)
+                ? clampCursorTtsVolumeUi(j.volume)
+                : CURSOR_TTS_VOLUME_UI_DEFAULT,
+          }),
+        });
+        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+        const j2 = await r2.json();
+        setMuted(!!j2.muted);
+        if (typeof j2.profile === "string" && j2.profile) setProfile(normalizeProfileId(j2.profile));
+        if (typeof j2.volume === "number" && Number.isFinite(j2.volume)) {
+          setHookVolume(clampCursorTtsVolumeUi(j2.volume));
+        }
+        setBridge(true);
+        setVoiceListNonce((n) => n + 1);
+      } catch (e) {
+        setErr(String(e?.message || e));
+      }
+    },
+    [refresh],
+  );
+
+  /** Force mute on, brief pause, restore prior mute — power-cycle for START/STOP recovery. */
+  const muteCycleRecover = useCallback(
+    async (profileId) => {
+      try {
+        const j = await refresh();
+        if (!j?.bridge) return;
+        const pid = normalizeProfileId(profileId);
+        const savedMuted = !!j.muted;
+
+        const postJson = async (body) => {
+          const r = await fetch(MECHANICUS_CURSOR_BRIDGE, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        };
+
+        const vol =
+          typeof j.volume === "number" && Number.isFinite(j.volume)
+            ? clampCursorTtsVolumeUi(j.volume)
+            : CURSOR_TTS_VOLUME_UI_DEFAULT;
+        await postJson({ muted: true, profile: pid, volume: vol });
+        setMuted(true);
+        await new Promise((r) => setTimeout(r, 140));
+
+        const j2 = await postJson({ muted: savedMuted, profile: pid, volume: vol });
+        setMuted(!!j2.muted);
+        if (typeof j2.profile === "string" && j2.profile) setProfile(normalizeProfileId(j2.profile));
+        if (typeof j2.volume === "number" && Number.isFinite(j2.volume)) {
+          setHookVolume(clampCursorTtsVolumeUi(j2.volume));
+        }
+        setBridge(true);
+        setVoiceListNonce((n) => n + 1);
+        await refresh();
+      } catch (e) {
+        setErr(String(e?.message || e));
+      }
+    },
+    [refresh],
+  );
+
+  const postState = async (patch = {}) => {
+    const volumeOnly =
+      Object.keys(patch).length === 1 && "volume" in patch && !("muted" in patch) && !("profile" in patch);
+    if (!volumeOnly) {
+      setBusy(true);
+    }
     setErr(null);
     try {
+      const nextMuted = "muted" in patch ? patch.muted : muted;
+      const nextProfile = normalizeProfileId("profile" in patch ? patch.profile : effectiveProfile);
+      const nextVol =
+        "volume" in patch && typeof patch.volume === "number" && Number.isFinite(patch.volume)
+          ? clampCursorTtsVolumeUi(patch.volume)
+          : hookVolume;
       const r = await fetch(MECHANICUS_CURSOR_BRIDGE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({
+          muted: nextMuted,
+          profile: nextProfile,
+          volume: clampCursorTtsVolumeUi(nextVol),
+        }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setMuted(!!j.muted);
-      if (typeof j.profile === "string" && j.profile) setProfile(j.profile);
+      if (typeof j.profile === "string" && j.profile) setProfile(normalizeProfileId(j.profile));
+      if (typeof j.volume === "number" && Number.isFinite(j.volume)) {
+        setHookVolume(clampCursorTtsVolumeUi(j.volume));
+      }
       setBridge(true);
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
-      setBusy(false);
+      if (!volumeOnly) {
+        setBusy(false);
+      }
     }
   };
 
   const setHookEnabled = (on) => {
-    void postState({ muted: !on });
+    const pid = normalizeProfileId(effectiveProfile);
+    void (async () => {
+      await postState({ muted: !on, profile: pid });
+      await muteCycleRecover(pid);
+    })();
   };
 
   const setVoiceProfile = (id) => {
-    void postState({ profile: id });
+    const pid = normalizeProfileId(id);
+    void (async () => {
+      await postState({ profile: pid });
+      await resyncHookFiles(pid);
+    })();
+  };
+
+  const setHookVolumeFromUi = (next) => {
+    const v = clampCursorTtsVolumeUi(next);
+    setHookVolume(v);
+    void postState({ volume: v });
   };
 
   return (
     <PipelineShell
+      bare
       title="CURSOR · AFTER-REPLY"
       gridW={gridW}
       gridH={gridH}
       accent={accent}
-      subtitle={bridge ? "dev bridge" : "static / prod"}
+      showTitleRow={false}
       style={{
+        flex: 1,
         minHeight: 0,
-        height: "100%",
-        width: "100%",
-        maxWidth: "100%",
-        boxSizing: "border-box",
-        overflow: "visible",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          padding: 6,
-          overflow: "visible",
-          borderRadius: 12,
-          border: "1px solid #2a2410",
-          background: "#080703",
-          color: "#c7c7c7",
-          fontSize: 10,
-          lineHeight: 1.4,
-          width: "100%",
-          minHeight: 0,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-            padding: "4px 2px",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ color: accent, letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9 }}>
-            Cursor TTS
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span
-              style={{
-                fontFamily: "monospace",
-                fontSize: 9,
-                letterSpacing: "0.14em",
-                color: hookOn ? "#6dff9a" : "#ff8a4a",
-              }}
-            >
-              {hookOn ? "ON" : "OFF"}
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={hookOn}
-              aria-label={hookOn ? "Cursor after-reply TTS on" : "Cursor after-reply TTS off"}
-              disabled={busy || !bridge}
-              onClick={() => setHookEnabled(!hookOn)}
-              style={{
-                position: "relative",
-                width: 52,
-                height: 26,
-                borderRadius: 13,
-                border: `1px solid ${hookOn ? "rgba(109,255,154,0.45)" : "rgba(255,138,74,0.45)"}`,
-                background: hookOn ? "rgba(20,48,28,0.95)" : "rgba(48,22,14,0.95)",
-                cursor: bridge && !busy ? "pointer" : "not-allowed",
-                padding: 0,
-                flexShrink: 0,
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  top: 3,
-                  left: hookOn ? 28 : 3,
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  background: hookOn ? "#6dff9a" : "#ff8a4a",
-                  boxShadow: "0 1px 4px rgba(0,0,0,0.5)",
-                  transition: "left 0.15s ease",
-                }}
-              />
-            </button>
-          </div>
-        </div>
-
-        <div
-          style={{
-            flex: "0 1 auto",
-            width: "100%",
-            minWidth: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            padding: "6px 0 2px",
-          }}
-        >
-          {cursorWheelOptions.length ? (
-            <VoiceAdaptiveWheel
-              value={profile}
-              onValueChange={(value) => setVoiceProfile(value)}
-              options={cursorWheelOptions}
-              wrapperClassName="border-0"
-              dimmed={busy || !bridge}
-              accent={accent}
-              maxWidthPx={232}
-            />
-          ) : null}
-        </div>
-
-        <div style={{ color: "#6a6a6a", fontSize: 8, lineHeight: 1.45, flexShrink: 0 }}>
-          {!bridge
-            ? "Run pnpm dev (or preview) so the bridge can write .cursor/hooks/ — or edit mechanicus-cursor.muted and cursor-tts-voice.txt by hand."
-            : "Voice → cursor-tts-voice.txt · ON/OFF → mechanicus-cursor.muted (hook reads these each reply)."}
-        </div>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", flexShrink: 0 }}>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void refresh()}
-            style={{
-              padding: "6px 10px",
-              background: "#0d0d0d",
-              color: "#8a8a8a",
-              border: "1px solid #2a2a2a",
-              borderRadius: 8,
-              cursor: !busy ? "pointer" : "not-allowed",
-              fontFamily: "monospace",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-          >
-            Refresh
-          </button>
-        </div>
-        {err ? (
-          <div style={{ color: "#ff8a8a", fontSize: 9, flexShrink: 0 }}>{err}</div>
-        ) : null}
-      </div>
-    </PipelineShell>
-  );
-}
-
-function ProfileStage({ savedProfiles, selectedProfileId, onProfileChange, onCopyProfile, gridW, gridH }) {
-  const selectedProfile =
-    savedProfiles.find((profile) => profile.id === selectedProfileId) || savedProfiles[0] || null;
-
-  const profileOptions = savedProfiles.map((profile) => ({
-    label: profile.label,
-    value: profile.id,
-    textValue: `${profile.label} ${profile.description} ${profile.id}`,
-  }));
-
-  return (
-    <PipelineShell
-      title="[|[|\/| PROFILE"
-      gridW={gridW}
-      gridH={gridH}
-      accent="#d9b45b"
-      subtitle="immutable + wip"
-      style={{
-        minHeight: 0,
-        minWidth: 0,
         height: "100%",
         width: "100%",
         maxWidth: "100%",
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
-        overflow: "visible",
       }}
     >
       <div
         style={{
-          display: "grid",
-          gridTemplateRows: "auto auto",
-          overflow: "visible",
-          gridTemplateColumns: "minmax(0, 1fr)",
-          gap: 10,
-          alignItems: "stretch",
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
           flex: 1,
           minHeight: 0,
           width: "100%",
+          borderRadius: 12,
+          border: "1px solid #2a2410",
+          background: "#080703",
+          color: "#c7c7c7",
+          fontSize: 10,
+          overflow: "hidden",
         }}
       >
         <div
+          className="voice-card-handle"
+          aria-label="CURSOR · AFTER-REPLY"
+          title={bridge ? "dev bridge" : "static / prod"}
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-            padding: 6,
-            borderRadius: 12,
-            border: "1px solid #222",
-            background: "#090909",
-            minHeight: 0,
-            width: "100%",
-            minWidth: 0,
-            alignItems: "center",
+            flexShrink: 0,
+            height: 10,
+            cursor: "move",
+            borderRadius: "6px 6px 0 0",
+            background: `linear-gradient(90deg, transparent, ${accent}22, transparent)`,
+            opacity: 0.55,
+            userSelect: "none",
           }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: 6, alignItems: "center" }}>
-            {profileOptions.length ? (
-              <VoiceAdaptiveWheel
-                value={selectedProfile?.id || selectedProfileId}
-                onValueChange={(value) => onProfileChange(value)}
-                options={profileOptions}
-                wrapperClassName="border-0"
-                dimmed={false}
-                accent="#d9b45b"
-                maxWidthPx={236}
-              />
-            ) : (
-              <div
-                style={{
-                  padding: 8,
-                  borderRadius: 10,
-                  border: "1px dashed #222",
-                  color: "#7a7a7a",
-                  fontSize: 10,
-                  lineHeight: 1.35,
-                }}
-              >
-                No saved profiles yet.
-              </div>
-            )}
-          </div>
-        </div>
-
+        />
         <div
           style={{
-            display: "grid",
-            gap: 4,
-            padding: 6,
-            borderRadius: 12,
-            border: "1px solid #222",
-            background: "#070707",
-            color: "#c7c7c7",
-            fontSize: 9,
-            lineHeight: 1.3,
+            position: "relative",
+            flex: 1,
             minHeight: 0,
-            width: "100%",
-            flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "6px 6px 104px",
+            overflowY: "auto",
+            overflowX: "hidden",
+            overscrollBehavior: "contain",
+            lineHeight: 1.4,
           }}
         >
-          <div style={{ color: "#d9b45b", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 9 }}>
-            Data Sheet
-          </div>
-          <div style={{ color: "#9bdcff" }}>Selected: {selectedProfile?.label || "None"}</div>
-          <div style={{ color: "#7a7a7a" }}>
-            {selectedProfile?.description || "Pick a saved voice profile to load."}
-          </div>
-          <div style={{ color: "#7a7a7a" }}>
-            Model: {selectedProfile?.modelMode || "tts"} / {selectedProfile?.language || "en-US"}
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => onCopyProfile(selectedProfile?.id || selectedProfileId)}
-              disabled={!selectedProfile}
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 6,
+              zIndex: 40,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: 6,
+              pointerEvents: "none",
+            }}
+          >
+            <div
               style={{
-                padding: "4px 7px",
-                background: selectedProfile ? "#101010" : "#070707",
-                color: selectedProfile ? "#a9d0ff" : "#4a4a4a",
-                border: `1px solid ${selectedProfile ? "rgba(127,215,255,0.25)" : "#222"}`,
-                borderRadius: 8,
-                cursor: selectedProfile ? "pointer" : "not-allowed",
-                fontFamily: "monospace",
+                pointerEvents: "auto",
+                touchAction: "none",
+                transform: "scale(0.58)",
+                transformOrigin: "50% 100%",
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              title={`Level ${hookVolume}%`}
+            >
+              <Knob
+                label="Level"
+                unit="%"
+                min={CURSOR_TTS_VOLUME_UI_MIN}
+                max={CURSOR_TTS_VOLUME_UI_MAX}
+                step={1}
+                value={hookVolume}
+                onValueChange={setHookVolumeFromUi}
+                wheelMultiplier={3.6}
+                dragMultiplier={4.4}
+                size="sm"
+                theme="dark"
+                showReadout={false}
+                showLabel={false}
+                disabled={busy || !bridge}
+                className="w-16 shrink-0"
+              />
+            </div>
+            <div style={{ pointerEvents: "auto", lineHeight: 0 }}>
+              <AsciiStartStopButton
+                running={hookOn}
+                disabled={busy || !bridge}
+                onRunningChange={setHookEnabled}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              flex: "0 0 auto",
+              width: "100%",
+              minWidth: 0,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              justifyContent: "flex-start",
+              padding: "0 8px 0 8px",
+              overflow: "visible",
+            }}
+          >
+            {cursorWheelOptions.length ? (
+              <VoiceAdaptiveWheel
+                value={effectiveProfile}
+                onValueChange={(value) => setVoiceProfile(value)}
+                options={cursorWheelOptions}
+                wrapperClassName="border-0"
+                dimmed={busy || !bridge}
+                accent={accent}
+                fullWidth
+                optionItemHeight={cursorWheelRowHeight}
+                bezelTitle="Cursor"
+              />
+            ) : null}
+          </div>
+
+          <div
+            style={{
+              flexShrink: 0,
+              overflow: "hidden",
+            }}
+          >
+            {!bridge ? (
+              <div style={{ color: "#6a6a6a", fontSize: 7, lineHeight: 1.35 }}>
+                Run pnpm dev (or preview) so the bridge can write .cursor/hooks/ — or edit mechanicus-cursor.muted,
+                cursor-tts-voice.txt, and cursor-tts-volume.txt (0–100, 100 = default) by hand.
+              </div>
+            ) : null}
+            <div
+              style={{
+                color: "#a8a8a8",
+                fontFamily: "ui-sans-serif, system-ui, sans-serif",
                 fontSize: 8,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
+                lineHeight: 1.45,
+                wordBreak: "break-word",
+                opacity: bridge ? 1 : 0.55,
               }}
             >
-              Copy Immutable
-            </button>
+              {String(cursorVoiceResolved?.description || "").trim() ||
+                "No short description for this profile."}
+            </div>
           </div>
+
+          {err ? (
+            <div style={{ color: "#ff8a8a", fontSize: 9, flexShrink: 0 }}>{err}</div>
+          ) : null}
         </div>
       </div>
     </PipelineShell>
   );
 }
 
-export default function VoiceFlowPanel({ defaultProfileId = "jenna-jacket", compact = false } = {}) {
-  const [libraryVersion, setLibraryVersion] = useState(0);
-  const savedProfiles = useMemo(() => getAllVoiceProfiles(), [libraryVersion]);
-  const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
-  const [tunedProfile, setTunedProfile] = useState(null);
-  const stripCopySuffix = (value) =>
-    String(value || "")
-      .replace(/(?:\s+copy)+$/i, "")
-      .trim();
+/** VS Code agent voice: poll dev bridge without `window` globals; abort in-flight fetch on stop/unmount. */
+const VSCODE_VOICE_POLL_MS = 3500;
 
-  const activeProfile = useMemo(
-    () => tunedProfile || resolveVoiceProfile(selectedProfileId),
-    [selectedProfileId, tunedProfile],
-  );
+function useVscodeAgentVoicePoller(profileId) {
+  const intervalRef = useRef(null);
+  const lastUrlRef = useRef("");
+  const abortRef = useRef(null);
+  const profileRef = useRef(profileId);
+  profileRef.current = profileId;
+
+  const stop = useCallback(() => {
+    if (intervalRef.current != null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    abortRef.current?.abort();
+    abortRef.current = null;
+    lastUrlRef.current = "";
+  }, []);
+
+  const tick = useCallback(async () => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const pid = String(profileRef.current || "").trim() || DEFAULT_CURSOR_TTS_PROFILE_ID;
+    try {
+      const res = await fetch("/__cyberdeck/vscode-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ muted: false, profile: pid }),
+        signal: ac.signal,
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const url = data?.audioUrl;
+      if (typeof url !== "string" || !url || url === lastUrlRef.current) return;
+      const audio = new Audio(url);
+      await audio.play();
+      lastUrlRef.current = url;
+    } catch (e) {
+      if (e?.name === "AbortError") return;
+    }
+  }, []);
+
+  const start = useCallback(() => {
+    if (intervalRef.current != null) return;
+    void tick();
+    intervalRef.current = window.setInterval(() => {
+      void tick();
+    }, VSCODE_VOICE_POLL_MS);
+  }, [tick]);
+
+  useEffect(() => () => stop(), [stop]);
+
+  return { start, stop };
+}
+
+function VoiceFlowPanel({ compact = false } = {}) {
+  const [vscodeProfileId, setVscodeProfileId] = useState(DEFAULT_CURSOR_TTS_PROFILE_ID);
+  const vscodeVoicePoller = useVscodeAgentVoicePoller(vscodeProfileId);
 
   const [voiceGridLayout, setVoiceGridLayout] = useState(() => [
     {
-      i: "profile",
+      i: "cursor",
       x: 0,
       y: 0,
-      w: 6,
-      h: 14,
+      w: 4,
+      h: 6,
       minW: 2,
-      minH: 12,
+      minH: 4,
       resizeHandles: ["e", "s", "se"],
       isResizable: true,
       isDraggable: true,
     },
     {
-      i: "blank",
-      x: 6,
+      i: "vscode",
+      x: 4,
       y: 0,
-      w: 6,
-      h: 14,
-      minW: 2,
-      minH: 8,
+      w: 4, // match cursor card width
+      h: 6, // match cursor card height
+      minW: 1, // allow smaller min width
+      minH: 2, // allow smaller min height
+      resizeHandles: ["e", "s", "se"],
+      isResizable: true,
+      isDraggable: true,
+    },
+    {
+      i: "codex",
+      x: 8,
+      y: 0,
+      w: 4,
+      h: 6,
+      minW: 1,
+      minH: 2,
       resizeHandles: ["e", "s", "se"],
       isResizable: true,
       isDraggable: true,
     },
   ]);
+  const [voiceGridContainerWidth, setVoiceGridContainerWidth] = useState(0);
 
-  useEffect(() => {
-    const next = resolveVoiceProfile(defaultProfileId);
-    setSelectedProfileId(next.id);
-    setTunedProfile(null);
-  }, [defaultProfileId]);
+  const cursorGridItem = useMemo(() => voiceGridLayout.find((item) => item.i === "cursor"), [voiceGridLayout]);
+  const cursorGridW = cursorGridItem?.w ?? 4;
+  const cursorGridH = cursorGridItem?.h ?? 6;
+  const vscodeGridItem = useMemo(() => voiceGridLayout.find((item) => item.i === "vscode"), [voiceGridLayout]);
+  const vscodeGridW = vscodeGridItem?.w ?? 4;
+  const vscodeGridH = vscodeGridItem?.h ?? 6;
+  const codexGridItem = useMemo(() => voiceGridLayout.find((item) => item.i === "codex"), [voiceGridLayout]);
+  const codexGridW = codexGridItem?.w ?? 4;
+  const codexGridH = codexGridItem?.h ?? 6;
 
-  const handleCopyProfile = (profileId) => {
-    const sourceProfile = resolveVoiceProfile(profileId || selectedProfileId);
-    const copyLabelBase = stripCopySuffix(sourceProfile.label || DEFAULT_PRESET_NAME);
-    const copiedProfile = saveVoiceProfilePreset({
-      id: `${sourceProfile.id}-copy`,
-      label: `${copyLabelBase} Copy`,
-      description: `Immutable copy of ${sourceProfile.label || sourceProfile.id}.`,
-      browserVoice: sourceProfile.browserVoice,
-      nativeVoice: sourceProfile.nativeVoice,
-      forceNativeTTS: sourceProfile.forceNativeTTS,
-      modelMode: sourceProfile.modelMode || "tts",
-      language: sourceProfile.language || "en-US",
-      speakMode: sourceProfile.speakMode || "conversation",
-      speakerMode: sourceProfile.speakerMode || "auto",
-      rate: sourceProfile.rate,
-      pitch: sourceProfile.pitch,
-      volume: sourceProfile.volume,
-      ttsRate: Number(sourceProfile.ttsRate ?? 0),
-      ttsPitch: Number(sourceProfile.ttsPitch ?? 0),
-      ttsVolume: Number(sourceProfile.ttsVolume ?? 0),
-      effect: sourceProfile.effect || "",
-      aliases: sourceProfile.aliases || [],
-    });
-
-    setTunedProfile(copiedProfile);
-    setSelectedProfileId(copiedProfile.id);
-    setLibraryVersion((version) => version + 1);
+  const handleVoiceGridLayoutChange = (nextLayout, measuredWidth) => {
+    setVoiceGridLayout(clampVoiceGridLayout(nextLayout, measuredWidth || voiceGridContainerWidth));
   };
-
-  const profileGridItem = useMemo(
-    () => voiceGridLayout.find((item) => item.i === "profile"),
-    [voiceGridLayout],
-  );
-  const blankGridItem = useMemo(() => voiceGridLayout.find((item) => item.i === "blank"), [voiceGridLayout]);
-  const profileGridW = profileGridItem?.w ?? 6;
-  const profileGridH = profileGridItem?.h ?? 14;
-  const blankGridW = blankGridItem?.w ?? 6;
-  const blankGridH = blankGridItem?.h ?? 14;
 
   return (
     <div
       style={{
         width: "100%",
-        minHeight: compact ? 720 : 820,
-        height: compact ? 720 : 820,
+        minHeight: compact ? "min(720px, calc(100dvh - 170px))" : "min(820px, calc(100dvh - 130px))",
+        height: compact ? "min(720px, calc(100dvh - 170px))" : "min(820px, calc(100dvh - 130px))",
         borderRadius: 20,
         border: "1px solid rgba(0,255,102,0.18)",
         overflow: "visible",
@@ -562,8 +779,9 @@ export default function VoiceFlowPanel({ defaultProfileId = "jenna-jacket", comp
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <span>{"Speak -> Profile -> Model -> Tuner -> Player"}</span>
-        <span>{activeProfile?.label || "PROFILE"}</span>
+        <span>Cursor</span>
+        <span>VS Code</span>
+        <span>Codex</span>
       </div>
 
       <div
@@ -571,23 +789,76 @@ export default function VoiceFlowPanel({ defaultProfileId = "jenna-jacket", comp
           height: "calc(100% - 40px)",
           overflowY: "auto",
           overflowX: "visible",
-          padding: "32px 12px 40px 12px",
+          padding: "10px 12px 24px 12px",
         }}
       >
         <div style={{ minHeight: 0 }}>
-          <VoiceGrid layout={voiceGridLayout} onLayoutChange={setVoiceGridLayout}>
-            <div key="profile" style={{ minHeight: 0, height: "100%" }}>
-              <ProfileStage
-                savedProfiles={savedProfiles}
-                selectedProfileId={selectedProfileId}
-                onProfileChange={setSelectedProfileId}
-                onCopyProfile={handleCopyProfile}
-                gridW={profileGridW}
-                gridH={profileGridH}
+          <VoiceGrid layout={voiceGridLayout} onLayoutChange={handleVoiceGridLayoutChange} onContainerWidth={setVoiceGridContainerWidth}>
+            <div key="cursor" style={{ minHeight: 0, height: "100%" }}>
+              <MechanicusCursorStage gridW={cursorGridW} gridH={cursorGridH} />
+            </div>
+            <div
+              key="vscode"
+              style={{
+                minHeight: 0,
+                height: "100%",
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                padding: 0,
+              }}
+            >
+              <div
+                className="voice-card-handle"
+                style={{
+                  flexShrink: 0,
+                  height: 10,
+                  cursor: "move",
+                  borderRadius: "6px 6px 0 0",
+                  background: "linear-gradient(90deg, transparent, #78b8ff22, transparent)",
+                  opacity: 0.55,
+                  userSelect: "none",
+                  marginBottom: 2,
+                  zIndex: 2,
+                }}
+                aria-label="VS Code drag handle"
+                title="Drag to move"
+              />
+              <VSCodeVoiceCard
+                selectedProfile={vscodeProfileId}
+                onProfileChange={setVscodeProfileId}
+                isContinuous
+                onStart={vscodeVoicePoller.start}
+                onStop={vscodeVoicePoller.stop}
+                accent="#78b8ff"
+                style={{ marginTop: 0, height: "100%", width: "100%" }}
               />
             </div>
-            <div key="blank" style={{ minHeight: 0, height: "100%" }}>
-              <MechanicusCursorStage gridW={blankGridW} gridH={blankGridH} />
+            <div key="codex" style={{ minHeight: 0, height: "100%", position: "relative", display: "flex", flexDirection: "column", padding: 0 }}>
+              <div
+                className="voice-card-handle"
+                style={{
+                  flexShrink: 0,
+                  height: 10,
+                  cursor: "move",
+                  borderRadius: "6px 6px 0 0",
+                  background: "linear-gradient(90deg, transparent, rgba(155,255,155,0.14), transparent)",
+                  opacity: 0.55,
+                  userSelect: "none",
+                  marginBottom: 2,
+                  zIndex: 2,
+                }}
+                aria-label="Codex drag handle"
+                title="Drag to move"
+              />
+              <VoiceCard
+                compact
+                title="CODEX"
+                accent="#9bff9b"
+                defaultProfile="jenna-jacket"
+                sampleText="Codex online. Drop the next prompt here."
+                style={{ marginTop: 0, height: "100%", width: "100%" }}
+              />
             </div>
           </VoiceGrid>
         </div>
@@ -596,9 +867,18 @@ export default function VoiceFlowPanel({ defaultProfileId = "jenna-jacket", comp
   );
 }
 
-function VoiceGrid({ layout, onLayoutChange, children }) {
+function VoiceGrid({ layout, onLayoutChange, onContainerWidth, children }) {
   const { width, containerRef, mounted } = useContainerWidth();
   const accent = "rgba(127,215,255,0.9)";
+
+  useEffect(() => {
+    onContainerWidth?.(width || 0);
+  }, [onContainerWidth, width]);
+
+  const handleLayoutChange = (nextLayout) => {
+    onLayoutChange?.(nextLayout, width || 0);
+  };
+
   const resizeHandle = (axis, ref) => {
     const base = { position: "absolute", pointerEvents: "auto", opacity: 0.95, zIndex: 2, boxSizing: "border-box" };
     if (axis === "e") {
@@ -643,8 +923,8 @@ function VoiceGrid({ layout, onLayoutChange, children }) {
         aria-hidden="true"
         style={{
           ...base,
-          right: 2,
-          bottom: 2,
+          right: 0,
+          bottom: 0,
           width: 18,
           height: 18,
           borderRight: `2px solid ${accent}`,
@@ -664,11 +944,11 @@ function VoiceGrid({ layout, onLayoutChange, children }) {
         <ReactGridLayout
           width={width}
           layout={layout}
-          onLayoutChange={onLayoutChange}
+          onLayoutChange={handleLayoutChange}
           gridConfig={{
-            cols: 12,
-            rowHeight: 24,
-            margin: [12, 12],
+            cols: VOICE_GRID_COLS,
+            rowHeight: VOICE_GRID_ROW_HEIGHT,
+            margin: [VOICE_GRID_MARGIN_X, VOICE_GRID_MARGIN_Y],
             containerPadding: [0, 0],
           }}
           dragConfig={{ enabled: true, handle: ".voice-card-handle" }}
@@ -682,3 +962,5 @@ function VoiceGrid({ layout, onLayoutChange, children }) {
     </div>
   );
 }
+
+export default VoiceFlowPanel;
