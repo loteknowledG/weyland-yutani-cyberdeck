@@ -8,7 +8,8 @@ Logs (gitignored): mechanicus-hook.log (flow + snippet + pid); mechanicus-tts-st
 Voice profile for speak: `.cursor/hooks/cursor-tts-voice.txt` (one line: slug id, e.g. mechanicus-voice); Cyberdeck dev bridge writes this file.
 Optional gain: `.cursor/hooks/cursor-tts-volume.txt` (integer 0–100, 100 = profile default; Cyberdeck Cursor card knob).
 If the hook log looks stale in the editor, reopen the file or run tail — Cursor often does not auto-refresh ignored logs.
-Smoke (real TTS): pnpm run hook:smoke-mechanicus-voice
+Smoke (real TTS, fixed fixture — not your chat): npm run hook:smoke-mechanicus-voice
+  (pipes `.cursor/hooks/sample-after-agent.json`; last sentence is intentionally generic).
 Debug stdin: set CURSOR_HOOK_MECHANICUS_DEBUG=1 for Cursor, then retry once.
 
 Disable: CURSOR_HOOK_MECHANICUS_LAST_SENTENCE=0
@@ -344,12 +345,15 @@ def main() -> int:
         tts_log.write(f"\n--- TTS stderr {time.strftime('%Y-%m-%dT%H:%M:%S')} ---\n")
         tts_log.flush()
         popen_kw["stderr"] = tts_log
+        env = popen_kw["env"]
+        env.pop("CURSOR_HOOK_BOOTUP_TTS_VOLUME", None)
         vol = _read_cursor_tts_volume_override()
         cmd = [sys.executable, vp, "speak", voice_profile]
-        # Use `--volume=-25%` (one token). A separate `-25%` argv is parsed as another flag
-        # because it starts with '-', which makes voice_profile.py exit before any audio.
+        # Volume trim via env (read in voice_profile.speak_profile) avoids argparse edge cases
+        # with negative % values and keeps assistant text from being mistaken for CLI flags.
         if vol:
-            cmd.append(f"--volume={vol}")
+            env["CURSOR_HOOK_BOOTUP_TTS_VOLUME"] = vol
+        cmd.append("--")
         cmd.append(snippet)
         try:
             proc = subprocess.Popen(

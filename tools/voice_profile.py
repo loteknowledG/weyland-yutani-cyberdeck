@@ -155,6 +155,9 @@ def speak_profile(
     volume: str | None = None,
 ) -> int:
     profile = resolve_profile(profile_name)
+    hook_vol = (os.environ.get("CURSOR_HOOK_BOOTUP_TTS_VOLUME") or "").strip()
+    if volume in (None, "") and hook_vol:
+        volume = hook_vol
     env = profile_env(profile, rate=rate, pitch=pitch, volume=volume)
     print(
         f"[VOICE] Speaking with profile '{profile['profile']}' "
