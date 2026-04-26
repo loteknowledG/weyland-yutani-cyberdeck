@@ -5,9 +5,9 @@
   "description": "",
   "main": "main.cjs",
   "scripts": {
-    "voice:warp-spider": "python tools/voice_profile.py speak warp-spider \"Warp spider voice check.\"",
-    "voice:cursor:warp-spider": "powershell -NoProfile -Command \"Set-Content -Path .cursor/hooks/cursor-tts-voice.txt -Value 'warp-spider'; if (Test-Path .cursor/hooks/mechanicus-cursor.muted) { Set-Content -Path .cursor/hooks/mechanicus-cursor.muted -Value '0' }; Write-Host 'Cursor hook voice set to warp-spider'\"",
     "dev": "vite --host 127.0.0.1 --port 3000",
+    "dev:electron": "electron main.cjs",
+    "dev:full": "concurrently \"npm run dev\" \"npm run dev:electron\"",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3000",
     "predeploy": "npm run build",
@@ -49,6 +49,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.5.0",
+    "concurrently": "^9.2.1",
     "electron": "^41.1.1",
     "gh-pages": "^6.3.0",
     "playwright": "1.50.1",

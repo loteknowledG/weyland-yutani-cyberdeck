@@ -117,7 +117,9 @@ export default function TerminalColumn({
               >
                 [{m.role}]
               </span>{" "}
-              {renderMessageText(m.text)}
+              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, display: "inline" }}>
+                {renderMessageText(m.text)}
+              </pre>
             </div>
           ))}
 

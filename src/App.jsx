@@ -4,8 +4,13 @@ import {
   playSystemSound,
   playLock,
   playSnapLock,
+  playThinking,
+  playResponseStart,
+  playResponseEnd,
 } from "./AudioEngine";
-import { transmit } from "./Uplink"; // Vite will automatically find .jsx
+import { transmit } from "./Uplink";
+import { fetchWeb, fetchUrl } from "./lib/webFetch";
+import { runBashCommand } from "./lib/bashTool";
 import { art, BOOT_LOGO } from "./TerminalArt";
 import { Memory } from "./lib/memory";
 import { db } from "./lib/db";
@@ -17,6 +22,7 @@ import VoiceFlowPanel from "./components/VoiceFlowPanel";
 import PiTerminal from "./components/PiTerminal";
 import { DEFAULT_CURSOR_TTS_PROFILE_ID } from "./lib/cursorTtsProfiles";
 
+const CHANNEL_KEY = "wyc_channel_data_v1";
 const APP_STATE_KEY = "wyc_app_state_v1";
 
 function loadAppState() {
@@ -32,9 +38,31 @@ function loadAppState() {
 function saveAppState(state) {
   try {
     window.localStorage.setItem(APP_STATE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage failures and keep the app running.
-  }
+  } catch {}
+}
+
+function loadChannelData() {
+  try {
+    const raw = localStorage.getItem(CHANNEL_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {}
+  return {
+    agenda: [],
+    intel: [],
+    logs: [],
+    providers: [],
+    "samus-manus": [],
+    "pi-terminal": [],
+  };
+}
+
+function saveChannelData(data) {
+  try {
+    localStorage.setItem(CHANNEL_KEY, JSON.stringify(data));
+  } catch {}
 }
 
 export default function App() {
@@ -45,17 +73,7 @@ export default function App() {
     () => persistedState.chan || "agenda",
   );
   const [input, setInput] = useState(() => persistedState.input || "");
-  const [channelData, setChannelData] = useState(
-    () =>
-      persistedState.channelData || {
-        agenda: [],
-        intel: [],
-        logs: [],
-        providers: [],
-        "samus-manus": [],
-        "pi-terminal": [],
-      },
-  );
+  const [channelData, setChannelData] = useState(loadChannelData);
   const [modelList, setModelList] = useState([]);
 
   // OPENCODE ADDED TO PROVIDERS
@@ -404,7 +422,10 @@ export default function App() {
     voiceTunerTtsRate,
     voiceTunerTtsPitch,
     voiceTunerTtsVolume,
-  ]);
+]);
+  useEffect(() => {
+    saveChannelData(channelData);
+  }, [channelData]);
 
   const pushNetworkEvent = (provider, status, detail = "") => {
     const ts = new Date().toLocaleTimeString([], { hour12: false });
@@ -797,12 +818,13 @@ export default function App() {
       ...prev,
       [chan]: [...prev[chan], { role: "AI", text: "", id: aiId }],
     }));
+    playThinking();
 
-    let systemPrompt = "You are MU/TH/UR 6000. Concise, technical.";
+    let systemPrompt = "You are MU/TH/UR 6000. Concise, technical. You have web access and bash tools.";
     if (chan === "intel")
-      systemPrompt = "Science Officer interface. objective data analysis.";
+      systemPrompt = "Science Officer interface. objective data analysis. You have web access and bash tools.";
     if (chan === "logs")
-      systemPrompt = "Mission Recorder. Chronological log format.";
+      systemPrompt = "Mission Recorder. Chronological log format. You have web access and bash tools.";
 
     let memoryContext = "";
     let memoryContextRows = [];
@@ -837,13 +859,65 @@ export default function App() {
       console.warn("MEMORY_ADD_USER_ERR", err);
     }
 
+    const isSearchQuery = /^(search|browse|look up|find|google|web|net|internet|http|www\.)/i.test(val.trim());
+    let webContext = "";
+    let bashContext = "";
+
+    const isBashCommand = /^(bash|sh|shell|\$|ls|cat|grep|find|echo|rm|mkdir|cd|pwd|touch|cp|mv|curl|wget|npm|node|python|git)\s/i.test(val.trim()) ||
+      /[;&|`$]/.test(val.trim());
+
+    let bashResult = null;
+    if (isBashCommand) {
+      bashContext = "[BASH_TOOL: MU/TH/UR will execute bash command and return output]";
+      const cmdResult = await runBashCommand(val);
+      if (cmdResult.success) {
+        bashResult = `[BASH_OUTPUT]\nstdout:\n${cmdResult.stdout}${cmdResult.stderr ? `\nstderr:\n${cmdResult.stderr}` : ""}`;
+      } else {
+        bashResult = `[BASH_ERROR]\n${cmdResult.error || cmdResult.stderr || "Command failed with exit code " + cmdResult.exitCode}`;
+      }
+    }
+
+    if (isSearchQuery) {
+      setChannelData((prev) => ({
+        ...prev,
+        [chan]: [
+          ...prev[chan],
+          { role: "SYS", text: "ACCESSING_NET..." },
+        ],
+      }));
+
+      try {
+        const query = val.replace(/^(search|browse|look up|find|google|web|net|internet)\s+/i, "").trim();
+        const webResult = await fetchWeb(query, 5);
+
+        if (webResult.success && webResult.urls.length > 0) {
+          webContext = [
+            "\nWEB_RESULTS:",
+            ...webResult.urls.map((url, i) => `${i + 1}. ${url}`),
+            "\nYou have web access. Fetch a URL if needed to get details.",
+          ].join("\n");
+        } else {
+          webContext = "\nWEB_RESULTS: No results found or fetch failed.";
+        }
+      } catch (err) {
+        webContext = `\nWEB_ERROR: ${String(err)}`;
+      }
+    }
+
     const promptMessages = [
       {
         role: "system",
-        content: `${systemPrompt}\n${memoryContext ? `\n${memoryContext}\n` : "\n"}Use relevant memory as background only.`,
+        content: `${systemPrompt}\n${memoryContext ? `${memoryContext}\n` : ""}${webContext ? `${webContext}\n` : ""}${bashContext ? `${bashContext}\n` : ""}Use relevant memory, web results, and bash tools as background.`,
       },
       { role: "user", content: val },
     ];
+
+    if (bashResult) {
+      promptMessages.push({
+        role: "system",
+        content: `BASH_RESULT:\n${bashResult}`,
+      });
+    }
 
     try {
       let endpoint = "";
@@ -868,6 +942,7 @@ export default function App() {
       const decoder = new TextDecoder();
       let fullContent = "";
       let streamBuffer = "";
+      let firstChunk = true;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -884,6 +959,10 @@ export default function App() {
             const content = parsed.choices[0]?.delta?.content || "";
 
             if (content) {
+              if (firstChunk) {
+                playResponseStart();
+                firstChunk = false;
+              }
               fullContent += content;
 
               // --- SAFETY SHIELD START ---
@@ -929,6 +1008,16 @@ export default function App() {
         } catch (err) {
           console.warn("MEMORY_ADD_AI_ERR", err);
         }
+      }
+
+      if (bashResult) {
+        setChannelData((prev) => ({
+          ...prev,
+          [chan]: [
+            ...prev[chan],
+            { role: "SYS", text: bashResult },
+          ],
+        }));
       }
     } catch (err) {
       setChannelData((prev) => ({
@@ -2198,7 +2287,7 @@ const speakCards =
           inputValue={input}
           onInputChange={(e) => {
             setInput(e.target.value);
-            playSystemSound("click", 0.04);
+            playSystemSound("keypress");
           }}
           onInputKeyDown={server === "p" ? undefined : handleSend}
           inputPlaceholder={

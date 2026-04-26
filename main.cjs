@@ -10,7 +10,7 @@ function createWindow() {
 
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    win.loadURL('http://localhost:3000');
   } else {
     win.loadFile(path.join(__dirname, 'dist/index.html'));
   }
